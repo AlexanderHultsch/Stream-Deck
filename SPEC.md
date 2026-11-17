@@ -38,7 +38,7 @@ Defaults:
 ## Editor
 - Served at `http://localhost:<PORT>/edit` **on the PC only**. The server refuses all write endpoints from non-loopback addresses.
 - Add, remove, reorder and edit buttons. Fields as in the table above.
-- A real file picker is not possible in a browser, so the exe path is typed or pasted. The editor may also offer a list of Start Menu apps (optional nice-to-have).
+- A real file picker is not possible in a browser, so the exe path is typed or pasted. Not included in v1.
 - Because writes are localhost-only, the "no protection" choice stays safe in practice: the phone can only tap.
 
 ## Phone UI
@@ -57,7 +57,7 @@ Defaults:
 Known caveat: Steam and Discord live in the tray and keep no normal window. "Focus" can fail there, so the fallback is to re-run the URI or exe, which raises the existing window.
 
 ## Icons / logos
-- The server extracts the icon from each target exe (Win32 `SHGetFileInfo` or `ExtractIconEx` through `ctypes`, largest size available), converts it to PNG and caches it in `cache/`.
+- The server extracts the icon from each target exe through `ctypes`: `PrivateExtractIconsW` at 256 px, falling back to `ExtractIconExW`. URI targets resolve the exe via the registry (`HKCR\<scheme>\shell\open\command`). The result is converted to PNG with a stdlib encoder and cached in `cache/`, keyed by id and a hash of the target.
 - URI-only buttons need `process` or an exe path to find an icon. Otherwise they use `logos/<id>.png`.
 - Risk: exe icons are often only 32 to 256 px and lower quality than official brand SVGs. `logos/` override files are the escape hatch.
 
@@ -69,6 +69,8 @@ buttons.json
 index.html   edit.html   app.js   style.css   manifest.webmanifest
 logos/       (optional overrides)
 cache/       (extracted icons, git-ignored)
+tests/       (unit tests, ui_smoke.js, ui_edit.js)
+.gitignore
 README.md    (setup: install Python, run start.bat, open firewall port, add to home screen)
 ```
 
@@ -77,3 +79,4 @@ README.md    (setup: install Python, run start.bat, open firewall port, add to h
 - SimMotion exe path and the exact SimHub path (needed for defaults and icon extraction).
 - Pick a port (default `8765`).
 - Testing: the sandbox is Linux, so Win32 pieces (focus, icon extraction) are stubbed and must be verified on the PC.
+- Status: v1 built and verified on Linux only; see the Windows verification checklist in README.md.
