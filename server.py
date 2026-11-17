@@ -42,6 +42,12 @@ STATIC_TYPES = {
     "manifest.webmanifest": "application/manifest+json",
 }
 
+DECK_ICON_SIZES = {
+    "/apple-touch-icon.png": 180,
+    "/icon-192.png": 192,
+    "/icon-512.png": 512,
+}
+
 DEFAULT_BUTTONS = [
     {"id": "steam", "name": "Steam", "target": "steam://open/main",
      "process": "steam.exe", "window": "normal", "ifRunning": "focus"},
@@ -343,6 +349,26 @@ def fallback_png(button_id):
     return encode_png(FALLBACK_SIZE, FALLBACK_SIZE, pixel * (FALLBACK_SIZE * FALLBACK_SIZE))
 
 
+def deck_icon_png(size):
+    background = (0x0b, 0x0d, 0x10, 0xff)
+    colours = ((0x1e, 0x90, 0xff, 0xff), (0x2e, 0xcc, 0x71, 0xff),
+               (0xff, 0x9f, 0x1a, 0xff), (0xe7, 0x4c, 0x3c, 0xff))
+    margin = int(size * 0.18)
+    gap = int(size * 0.08)
+    cell = (size - 2 * margin - gap) // 2
+    starts = (margin, margin + cell + gap)
+    rows = []
+    for y in range(size):
+        row_index = [i for i, s in enumerate(starts) if s <= y < s + cell]
+        row = bytearray(background * size)
+        if row_index:
+            for col, start in enumerate(starts):
+                colour = colours[row_index[0] * 2 + col]
+                row[start * 4:(start + cell) * 4] = colour * cell
+        rows.append(bytes(row))
+    return encode_png(size, size, b"".join(rows))
+
+
 def read_file(path):
     with open(path, "rb") as f:
         return f.read()
@@ -363,6 +389,8 @@ def cache_icon(cache_dir, cache_path, data):
 
 def icon_response(base_dir, button, extractor):
     bid = button["id"]
+    if not isinstance(bid, str) or not SLUG_RE.match(bid):
+        return "image/png", fallback_png(str(bid))
     logos = os.path.join(base_dir, "logos")
     for ext, content_type in ((".png", "image/png"), (".svg", "image/svg+xml")):
         logo = os.path.join(logos, bid + ext)
@@ -611,6 +639,8 @@ class Handler(BaseHTTPRequestHandler):
             self.get_buttons()
         elif path.startswith(prefix):
             self.get_icon(path[len(prefix):])
+        elif path in DECK_ICON_SIZES:
+            self.send_body(200, "image/png", deck_icon_png(DECK_ICON_SIZES[path]))
         elif path == "/":
             self.send_static("index.html")
         elif path == "/edit":

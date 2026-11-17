@@ -186,6 +186,16 @@ class IconResponseTest(unittest.TestCase):
         _, body = server.icon_response(self.base_dir, make_button(), server.NullExtractor())
         self.assertEqual(body, server.fallback_png("app"))
 
+    def test_invalid_id_gives_fallback_without_touching_paths(self):
+        self.write(self.logos, "x.png", b"logo-png")
+        extractor = FakeExtractor()
+        for bid in ("../logos/x", "../x", "a/b", "A", "", "x.png"):
+            btn = make_button(bid)
+            self.assertEqual(server.icon_response(self.base_dir, btn, extractor),
+                             ("image/png", server.fallback_png(bid)), bid)
+        self.assertEqual(extractor.targets, [])
+        self.assertFalse(os.path.exists(self.cache))
+
     def test_fallback_is_flat_deterministic_and_readable(self):
         data = server.fallback_png("steam")
         self.assertEqual(data, server.fallback_png("steam"))
@@ -199,6 +209,31 @@ class IconResponseTest(unittest.TestCase):
         colours = {server.fallback_png(bid) for bid in ("steam", "discord", "simhub", "simmotion")}
         self.assertGreaterEqual(len(colours), 2)
         self.assertNotEqual(server.fallback_png("steam"), server.fallback_png("discord"))
+
+
+class DeckIconTest(unittest.TestCase):
+    def test_corner_is_background_and_size_matches(self):
+        for size in (180, 192, 512):
+            width, height, pixels = decode_rgba(server.deck_icon_png(size))
+            self.assertEqual((width, height), (size, size))
+            self.assertEqual(pixels[:4], b"\x0b\x0d\x10\xff")
+            self.assertEqual(pixels[-4:], b"\x0b\x0d\x10\xff")
+
+    def test_accent_squares(self):
+        size = 512
+        _, _, pixels = decode_rgba(server.deck_icon_png(size))
+        margin = int(size * 0.18)
+        gap = int(size * 0.08)
+        cell = (size - 2 * margin - gap) // 2
+        starts = (margin, margin + cell + gap)
+        expected = ((0x1e, 0x90, 0xff), (0x2e, 0xcc, 0x71), (0xff, 0x9f, 0x1a), (0xe7, 0x4c, 0x3c))
+        for index, colour in enumerate(expected):
+            x = starts[index % 2] + cell // 2
+            y = starts[index // 2] + cell // 2
+            offset = (y * size + x) * 4
+            self.assertEqual(tuple(pixels[offset:offset + 3]), colour)
+        gap_offset = (starts[0] + cell // 2 + size * (margin + cell + gap // 2)) * 4
+        self.assertEqual(pixels[gap_offset:gap_offset + 4], b"\x0b\x0d\x10\xff")
 
 
 class IconEndpointTest(unittest.TestCase):
@@ -260,6 +295,28 @@ class IconEndpointTest(unittest.TestCase):
         status, resp, body = self.get("/api/icon/steam")
         self.assertEqual(status, 200)
         self.assertEqual(body[:8], SIGNATURE)
+
+    def test_deck_icons_served(self):
+        for path, size in (("/apple-touch-icon.png", 180), ("/icon-192.png", 192),
+                           ("/icon-512.png", 512)):
+            status, resp, body = self.get(path)
+            self.assertEqual(status, 200, path)
+            self.assertEqual(resp.getheader("Content-Type"), "image/png", path)
+            self.assertEqual(body[:8], SIGNATURE, path)
+            width, height = struct.unpack(">II", body[16:24])
+            self.assertEqual((width, height), (size, size), path)
+            self.assertEqual(body, server.deck_icon_png(size), path)
+
+    def test_deck_icons_served_to_remote_client(self):
+        self.stop_server()
+        self.start(lambda ip: False)
+        status, resp, body = self.get("/icon-192.png")
+        self.assertEqual((status, body[:8]), (200, SIGNATURE))
+
+    def test_other_icon_sizes_not_served(self):
+        for path in ("/icon-256.png", "/icon-192.png/x", "/apple-touch-icon-precomposed.png"):
+            status, resp, body = self.get(path)
+            self.assertEqual(status, 404, path)
 
     def test_unknown_id(self):
         status, resp, body = self.get("/api/icon/nope")
