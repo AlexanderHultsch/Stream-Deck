@@ -1,9 +1,12 @@
 import argparse
+import csv
 import ipaddress
 import json
 import os
 import re
 import socket
+import subprocess
+import sys
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +21,12 @@ CONFIG_NAME = "buttons.json"
 SLUG_RE = re.compile(r"^[a-z0-9-]+$")
 WINDOWS = ("normal", "minimized", "maximized")
 IF_RUNNING = ("focus", "new", "nothing")
+URI_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+SHOW_COMMANDS = {"normal": 1, "minimized": 2, "maximized": 3}
+SW_RESTORE = 9
+CREATE_NO_WINDOW = 0x08000000
+DETACHED_PROCESS = 0x00000008
+CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 STATIC_TYPES = {
     "index.html": "text/html; charset=utf-8",
@@ -166,17 +175,159 @@ def validate_buttons(buttons):
     return result
 
 
-def press_button(button):
-    return {"ok": True, "action": "launched", "message": "dry-run: " + button["name"]}
+def parse_tasklist(text):
+    result = []
+    for row in csv.reader(text.splitlines()):
+        if len(row) < 2:
+            continue
+        try:
+            pid = int(row[1])
+        except ValueError:
+            continue
+        result.append((row[0].lower(), pid))
+    return result
+
+
+def is_uri(target):
+    return URI_RE.match(target) is not None
+
+
+def show_command(window):
+    return SHOW_COMMANDS.get(window, 1)
+
+
+class DryRunPlatform:
+    def __init__(self):
+        self.launched = []
+
+    def is_running(self, process):
+        return False
+
+    def focus(self, process):
+        return False
+
+    def launch(self, target, window):
+        self.launched.append((target, window))
+
+
+class WindowsPlatform:
+    def pids(self, process):
+        result = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True,
+                                text=True, errors="replace", creationflags=CREATE_NO_WINDOW)
+        wanted = process.lower()
+        return {pid for name, pid in parse_tasklist(result.stdout) if name == wanted}
+
+    def is_running(self, process):
+        return bool(self.pids(process))
+
+    def find_window(self, user32, pids):
+        import ctypes
+        from ctypes import wintypes
+        found = []
+        pid = wintypes.DWORD()
+
+        def visit(hwnd, lparam):
+            if user32.IsWindowVisible(hwnd) and user32.GetWindowTextLengthW(hwnd) > 0:
+                user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+                if pid.value in pids:
+                    found.append(hwnd)
+                    return False
+            return True
+
+        callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+        user32.EnumWindows.restype = wintypes.BOOL
+        user32.EnumWindows(callback_type(visit), 0)
+        return found[0] if found else None
+
+    def focus(self, process):
+        import ctypes
+        from ctypes import wintypes
+        pids = self.pids(process)
+        if not pids:
+            return False
+        user32 = ctypes.WinDLL("user32")
+        user32.IsWindowVisible.argtypes = [wintypes.HWND]
+        user32.IsWindowVisible.restype = wintypes.BOOL
+        user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
+        user32.GetWindowTextLengthW.restype = ctypes.c_int
+        user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        user32.IsIconic.argtypes = [wintypes.HWND]
+        user32.IsIconic.restype = wintypes.BOOL
+        user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+        user32.ShowWindow.restype = wintypes.BOOL
+        user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+        user32.SetForegroundWindow.restype = wintypes.BOOL
+        user32.keybd_event.argtypes = [wintypes.BYTE, wintypes.BYTE, wintypes.DWORD,
+                                       ctypes.c_size_t]
+        user32.keybd_event.restype = None
+        hwnd = self.find_window(user32, pids)
+        if hwnd is None:
+            return False
+        if user32.IsIconic(hwnd):
+            user32.ShowWindow(hwnd, SW_RESTORE)
+        user32.keybd_event(0x12, 0, 0, 0)
+        user32.SetForegroundWindow(hwnd)
+        user32.keybd_event(0x12, 0, 2, 0)
+        return True
+
+    def launch(self, target, window):
+        if is_uri(target) or not target.lower().endswith(".exe"):
+            os.startfile(target)
+            return
+        startup = subprocess.STARTUPINFO()
+        startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startup.wShowWindow = show_command(window)
+        subprocess.Popen([target], cwd=os.path.dirname(target) or None, startupinfo=startup,
+                         creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                         close_fds=True, stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def default_platform():
+    if sys.platform == "win32":
+        return WindowsPlatform()
+    return DryRunPlatform()
+
+
+def launch_result(button, platform):
+    name = button["name"]
+    try:
+        platform.launch(button.get("target", ""), button.get("window", "normal"))
+    except OSError as e:
+        return {"ok": False, "action": "error",
+                "message": "Could not start %s: %s" % (name, e)}
+    return {"ok": True, "action": "launched", "message": "Launched " + name}
+
+
+def press_button(button, platform):
+    name = button["name"]
+    if not button.get("target"):
+        return {"ok": False, "action": "error", "message": "%s is not configured" % name}
+    process = button.get("process", "")
+    try:
+        if process and platform.is_running(process):
+            mode = button.get("ifRunning", "focus")
+            if mode == "nothing":
+                return {"ok": True, "action": "skipped",
+                        "message": "%s is already running" % name}
+            if mode == "focus" and platform.focus(process):
+                return {"ok": True, "action": "focused", "message": "Focused " + name}
+    except OSError as e:
+        return {"ok": False, "action": "error",
+                "message": "Could not check %s: %s" % (name, e)}
+    return launch_result(button, platform)
 
 
 class DeckServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, handler, base_dir, loopback_check):
+    def __init__(self, address, handler, base_dir, loopback_check, platform):
         super().__init__(address, handler)
         self.base_dir = base_dir
         self.loopback_check = loopback_check
+        self.platform = platform
         self.config_lock = threading.Lock()
 
 
@@ -296,14 +447,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         for button in buttons:
             if button.get("id") == button_id:
-                self.send_json(200, press_button(button))
+                self.send_json(200, press_button(button, self.server.platform))
                 return
         self.send_json(404, {"ok": False, "action": "error", "message": "unknown button"})
 
 
-def create_server(base_dir, host="127.0.0.1", port=0, loopback_check=is_loopback):
+def create_server(base_dir, host="127.0.0.1", port=0, loopback_check=is_loopback, platform=None):
     ensure_config(base_dir)
-    return DeckServer((host, port), Handler, base_dir, loopback_check)
+    if platform is None:
+        platform = default_platform()
+    return DeckServer((host, port), Handler, base_dir, loopback_check, platform)
 
 
 def main():

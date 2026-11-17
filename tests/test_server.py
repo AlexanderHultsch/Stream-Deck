@@ -252,7 +252,7 @@ class PressTest(ServerTestCase):
     def test_known_id(self):
         status, data = self.json_request("POST", "/api/press/steam")
         self.assertEqual(status, 200)
-        self.assertEqual(data, {"ok": True, "action": "launched", "message": "dry-run: Steam"})
+        self.assertEqual(data, {"ok": True, "action": "launched", "message": "Launched Steam"})
 
     def test_unknown_id(self):
         status, data = self.json_request("POST", "/api/press/nope")
