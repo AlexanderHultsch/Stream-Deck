@@ -1,4 +1,5 @@
 import argparse
+import base64
 import csv
 import hashlib
 import ipaddress
@@ -11,6 +12,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
@@ -32,6 +34,33 @@ DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 FALLBACK_SIZE = 128
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+WS_MAX_PAYLOAD = 4096
+WS_MAX_CONNECTIONS = 4
+WS_PING_INTERVAL = 15
+WS_OP_TEXT = 0x1
+WS_OP_CLOSE = 0x8
+WS_OP_PING = 0x9
+WS_OP_PONG = 0xA
+WS_BUTTONS = ("left", "right")
+WS_KEYS = ("backspace", "enter")
+MAX_MOVE = 500
+MAX_SCROLL = 400
+MAX_TEXT = 64
+WHEEL_STEP = 3
+INPUT_MOUSE = 0
+INPUT_KEYBOARD = 1
+MOUSEEVENTF_MOVE = 0x0001
+MOUSEEVENTF_LEFTDOWN = 0x0002
+MOUSEEVENTF_LEFTUP = 0x0004
+MOUSEEVENTF_RIGHTDOWN = 0x0008
+MOUSEEVENTF_RIGHTUP = 0x0010
+MOUSEEVENTF_WHEEL = 0x0800
+MOUSEEVENTF_HWHEEL = 0x1000
+KEYEVENTF_KEYUP = 0x0002
+KEYEVENTF_UNICODE = 0x0004
+VK_BACK = 0x08
+VK_RETURN = 0x0D
 
 STATIC_TYPES = {
     "index.html": "text/html; charset=utf-8",
@@ -313,6 +342,282 @@ def default_platform():
     if sys.platform == "win32":
         return WindowsPlatform()
     return DryRunPlatform()
+
+
+class DryRunInput:
+    def __init__(self):
+        self.events = []
+
+    def move(self, dx, dy):
+        self.events.append(("move", dx, dy))
+
+    def button(self, name, down):
+        self.events.append(("button", name, down))
+
+    def scroll(self, dx, dy):
+        self.events.append(("scroll", dx, dy))
+
+    def text(self, s):
+        self.events.append(("text", s))
+
+    def key(self, name):
+        self.events.append(("key", name))
+
+
+class WindowsInput:
+    BUTTON_FLAGS = {("left", True): MOUSEEVENTF_LEFTDOWN, ("left", False): MOUSEEVENTF_LEFTUP,
+                    ("right", True): MOUSEEVENTF_RIGHTDOWN, ("right", False): MOUSEEVENTF_RIGHTUP}
+    KEY_CODES = {"backspace": VK_BACK, "enter": VK_RETURN}
+
+    def __init__(self):
+        self.api = None
+        self.load_lock = threading.Lock()
+
+    def structures(self):
+        import ctypes
+        dword = ctypes.c_uint32
+        word = ctypes.c_uint16
+        ulong_ptr = ctypes.c_size_t
+
+        class MOUSEINPUT(ctypes.Structure):
+            _fields_ = [("dx", ctypes.c_int32), ("dy", ctypes.c_int32), ("mouseData", dword),
+                        ("dwFlags", dword), ("time", dword), ("dwExtraInfo", ulong_ptr)]
+
+        class KEYBDINPUT(ctypes.Structure):
+            _fields_ = [("wVk", word), ("wScan", word), ("dwFlags", dword), ("time", dword),
+                        ("dwExtraInfo", ulong_ptr)]
+
+        class HARDWAREINPUT(ctypes.Structure):
+            _fields_ = [("uMsg", dword), ("wParamL", word), ("wParamH", word)]
+
+        class INPUT_UNION(ctypes.Union):
+            _fields_ = [("mi", MOUSEINPUT), ("ki", KEYBDINPUT), ("hi", HARDWAREINPUT)]
+
+        class INPUT(ctypes.Structure):
+            _anonymous_ = ("u",)
+            _fields_ = [("type", dword), ("u", INPUT_UNION)]
+
+        return MOUSEINPUT, KEYBDINPUT, INPUT
+
+    def load(self):
+        with self.load_lock:
+            if self.api is None:
+                import ctypes
+                from ctypes import wintypes
+                INPUT = self.structures()[2]
+                user32 = ctypes.WinDLL("user32", use_last_error=True)
+                user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(INPUT), ctypes.c_int]
+                user32.SendInput.restype = wintypes.UINT
+                self.api = (user32, INPUT)
+            return self.api
+
+    def send(self, events):
+        import ctypes
+        if not events:
+            return
+        user32, INPUT = self.load()
+        array = (INPUT * len(events))()
+        for slot, event in zip(array, events):
+            if event[0] == "mouse":
+                _, dx, dy, data, flags = event
+                slot.type = INPUT_MOUSE
+                slot.mi.dx = dx
+                slot.mi.dy = dy
+                slot.mi.mouseData = data & 0xFFFFFFFF
+                slot.mi.dwFlags = flags
+            else:
+                _, vk, scan, flags = event
+                slot.type = INPUT_KEYBOARD
+                slot.ki.wVk = vk
+                slot.ki.wScan = scan
+                slot.ki.dwFlags = flags
+        if user32.SendInput(len(events), array, ctypes.sizeof(INPUT)) == 0:
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    def move(self, dx, dy):
+        self.send([("mouse", dx, dy, 0, MOUSEEVENTF_MOVE)])
+
+    def button(self, name, down):
+        self.send([("mouse", 0, 0, 0, self.BUTTON_FLAGS[(name, bool(down))])])
+
+    def scroll(self, dx, dy):
+        events = []
+        if dy:
+            events.append(("mouse", 0, 0, -dy * WHEEL_STEP, MOUSEEVENTF_WHEEL))
+        if dx:
+            events.append(("mouse", 0, 0, dx * WHEEL_STEP, MOUSEEVENTF_HWHEEL))
+        self.send(events)
+
+    def text(self, s):
+        data = s.encode("utf-16-le")
+        events = []
+        for unit in struct.unpack("<%dH" % (len(data) // 2), data):
+            events.append(("key", 0, unit, KEYEVENTF_UNICODE))
+            events.append(("key", 0, unit, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP))
+        self.send(events)
+
+    def key(self, name):
+        vk = self.KEY_CODES[name]
+        self.send([("key", vk, 0, 0), ("key", vk, 0, KEYEVENTF_KEYUP)])
+
+
+def default_input():
+    if sys.platform == "win32":
+        return WindowsInput()
+    return DryRunInput()
+
+
+class WsError(Exception):
+    def __init__(self, code):
+        super().__init__(code)
+        self.code = code
+
+
+def ws_accept_key(key):
+    digest = hashlib.sha1((key + WS_GUID).encode("utf-8")).digest()
+    return base64.b64encode(digest).decode("ascii")
+
+
+def ws_unmask(data, mask):
+    return bytes(b ^ mask[i & 3] for i, b in enumerate(data))
+
+
+def ws_encode_frame(opcode, payload=b"", mask=None, fin=True):
+    first = (0x80 if fin else 0) | opcode
+    flag = 0x80 if mask is not None else 0
+    size = len(payload)
+    if size < 126:
+        header = struct.pack(">BB", first, flag | size)
+    elif size < 65536:
+        header = struct.pack(">BBH", first, flag | 126, size)
+    else:
+        header = struct.pack(">BBQ", first, flag | 127, size)
+    if mask is not None:
+        return header + mask + ws_unmask(payload, mask)
+    return header + payload
+
+
+def ws_parse_header(buf):
+    if len(buf) < 2:
+        return None
+    first, second = buf[0], buf[1]
+    length = second & 0x7F
+    size = 2
+    if length == 126:
+        if len(buf) < 4:
+            return None
+        length = struct.unpack(">H", bytes(buf[2:4]))[0]
+        size = 4
+    elif length == 127:
+        if len(buf) < 10:
+            return None
+        length = struct.unpack(">Q", bytes(buf[2:10]))[0]
+        size = 10
+    mask = None
+    if second & 0x80:
+        if len(buf) < size + 4:
+            return None
+        mask = bytes(buf[size:size + 4])
+        size += 4
+    return bool(first & 0x80), first & 0x70, first & 0x0F, mask, length, size
+
+
+class WsReader:
+    def __init__(self, sock):
+        self.sock = sock
+        self.buf = bytearray()
+
+    def fill(self):
+        chunk = self.sock.recv(4096)
+        if not chunk:
+            raise ConnectionError("connection closed")
+        self.buf += chunk
+
+    def read_frame(self):
+        while True:
+            header = ws_parse_header(self.buf)
+            if header is not None:
+                break
+            self.fill()
+        fin, rsv, opcode, mask, length, size = header
+        if mask is None or rsv:
+            raise WsError(1002)
+        if length > WS_MAX_PAYLOAD:
+            raise WsError(1009)
+        if not fin or opcode in (0x0, 0x2):
+            raise WsError(1003)
+        if opcode not in (WS_OP_TEXT, WS_OP_CLOSE, WS_OP_PING, WS_OP_PONG):
+            raise WsError(1002)
+        if opcode >= WS_OP_CLOSE and length > 125:
+            raise WsError(1002)
+        total = size + length
+        while len(self.buf) < total:
+            self.fill()
+        payload = ws_unmask(self.buf[size:total], mask)
+        del self.buf[:total]
+        return opcode, payload
+
+
+def ws_call(backend, name, *args):
+    try:
+        getattr(backend, name)(*args)
+    except Exception:
+        pass
+
+
+def ws_number(msg, key, limit, default=None):
+    value = msg.get(key, default)
+    if type(value) is not int or abs(value) > limit:
+        return None
+    return value
+
+
+def ws_clean_text(value):
+    if not isinstance(value, str):
+        return None
+    cleaned = "".join(c for c in value if ord(c) >= 0x20 and ord(c) != 0x7F)
+    return cleaned if 1 <= len(cleaned) <= MAX_TEXT else None
+
+
+def ws_dispatch(backend, held, raw):
+    try:
+        msg = json.loads(raw.decode("utf-8"))
+    except (ValueError, RecursionError):
+        return
+    if not isinstance(msg, dict):
+        return
+    kind = msg.get("t")
+    if kind == "move":
+        dx = ws_number(msg, "dx", MAX_MOVE)
+        dy = ws_number(msg, "dy", MAX_MOVE)
+        if dx is not None and dy is not None:
+            ws_call(backend, "move", dx, dy)
+    elif kind == "btn":
+        name, down = msg.get("b"), msg.get("d")
+        if name in WS_BUTTONS and isinstance(down, bool):
+            if down:
+                held.add(name)
+            ws_call(backend, "button", name, down)
+            if not down:
+                held.discard(name)
+    elif kind == "click":
+        name = msg.get("b")
+        if name in WS_BUTTONS:
+            ws_call(backend, "button", name, True)
+            ws_call(backend, "button", name, False)
+    elif kind == "scroll":
+        dx = ws_number(msg, "dx", MAX_SCROLL, 0)
+        dy = ws_number(msg, "dy", MAX_SCROLL, 0)
+        if dx is not None and dy is not None:
+            ws_call(backend, "scroll", dx, dy)
+    elif kind == "text":
+        cleaned = ws_clean_text(msg.get("s"))
+        if cleaned is not None:
+            ws_call(backend, "text", cleaned)
+    elif kind == "key":
+        name = msg.get("k")
+        if name in WS_KEYS:
+            ws_call(backend, "key", name)
 
 
 def png_chunk(kind, data):
@@ -613,13 +918,18 @@ def press_button(button, platform):
 class DeckServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, handler, base_dir, loopback_check, platform, extractor):
+    def __init__(self, address, handler, base_dir, loopback_check, platform, extractor,
+                 input_backend=None):
         super().__init__(address, handler)
         self.base_dir = base_dir
         self.loopback_check = loopback_check
         self.platform = platform
         self.extractor = extractor
+        self.input_backend = input_backend
         self.config_lock = threading.Lock()
+        self.ws_ping_interval = WS_PING_INTERVAL
+        self.ws_connections = 0
+        self.ws_lock = threading.Lock()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -654,6 +964,8 @@ class Handler(BaseHTTPRequestHandler):
             self.get_icon(path[len(prefix):])
         elif path in DECK_ICON_SIZES:
             self.send_body(200, "image/png", deck_icon_png(DECK_ICON_SIZES[path]))
+        elif path == "/ws":
+            self.websocket()
         elif path == "/":
             self.send_static("index.html")
         elif path == "/edit":
@@ -763,15 +1075,112 @@ class Handler(BaseHTTPRequestHandler):
                 return
         self.send_json(404, {"ok": False, "action": "error", "message": "unknown button"})
 
+    def is_ws_upgrade(self):
+        connection = [t.strip().lower() for t in self.headers.get("Connection", "").split(",")]
+        return (self.headers.get("Upgrade", "").strip().lower() == "websocket"
+                and "upgrade" in connection
+                and self.headers.get("Sec-WebSocket-Version", "").strip() == "13"
+                and bool(self.headers.get("Sec-WebSocket-Key", "").strip()))
+
+    def ws_origin_allowed(self):
+        origin = self.headers.get("Origin")
+        if origin is None:
+            return True
+        try:
+            netloc = urlsplit(origin).netloc.lower()
+        except ValueError:
+            return False
+        return netloc != "" and netloc == self.headers.get("Host", "").strip().lower()
+
+    def websocket(self):
+        if not self.is_ws_upgrade():
+            self.send_error_json(400, "websocket upgrade required")
+            return
+        if not self.ws_origin_allowed():
+            self.send_error_json(403, "forbidden")
+            return
+        server = self.server
+        with server.ws_lock:
+            accepted = server.ws_connections < WS_MAX_CONNECTIONS
+            if accepted:
+                server.ws_connections += 1
+        if not accepted:
+            self.send_error_json(503, "too many connections")
+            return
+        self.ws_held = set()
+        self.close_connection = True
+        try:
+            accept = ws_accept_key(self.headers["Sec-WebSocket-Key"].strip())
+            self.wfile.write(("HTTP/1.1 101 Switching Protocols\r\n"
+                              "Upgrade: websocket\r\n"
+                              "Connection: Upgrade\r\n"
+                              "Sec-WebSocket-Accept: %s\r\n\r\n" % accept).encode("ascii"))
+            self.ws_loop()
+        except OSError:
+            pass
+        finally:
+            self.ws_release()
+            with server.ws_lock:
+                server.ws_connections -= 1
+
+    def ws_release(self):
+        held = sorted(self.ws_held)
+        self.ws_held.clear()
+        for name in held:
+            ws_call(self.server.input_backend, "button", name, False)
+
+    def ws_loop(self):
+        sock = self.connection
+        sock.settimeout(self.server.ws_ping_interval)
+        reader = WsReader(sock)
+        backend = self.server.input_backend
+        outstanding = False
+        while True:
+            try:
+                opcode, payload = reader.read_frame()
+            except socket.timeout:
+                if outstanding:
+                    return
+                sock.sendall(ws_encode_frame(WS_OP_PING))
+                outstanding = True
+                continue
+            except WsError as e:
+                self.ws_close(struct.pack(">H", e.code))
+                return
+            outstanding = False
+            if opcode == WS_OP_TEXT:
+                ws_dispatch(backend, self.ws_held, payload)
+            elif opcode == WS_OP_PING:
+                sock.sendall(ws_encode_frame(WS_OP_PONG, payload))
+            elif opcode == WS_OP_CLOSE:
+                self.ws_close(payload[:2] if len(payload) >= 2 else b"")
+                return
+
+    def ws_close(self, payload):
+        sock = self.connection
+        sock.sendall(ws_encode_frame(WS_OP_CLOSE, payload))
+        self.ws_release()
+        try:
+            sock.shutdown(socket.SHUT_WR)
+            sock.settimeout(0.5)
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and sock.recv(4096):
+                pass
+        except OSError:
+            pass
+
 
 def create_server(base_dir, host="127.0.0.1", port=0, loopback_check=is_loopback, platform=None,
-                  extractor=None):
+                  extractor=None, input_backend=None):
     ensure_config(base_dir)
     if platform is None:
         platform = default_platform()
     if extractor is None:
         extractor = default_extractor()
-    return DeckServer((host, port), Handler, base_dir, loopback_check, platform, extractor)
+    if input_backend is None:
+        input_backend = default_input()
+    return DeckServer((host, port), Handler, base_dir, loopback_check, platform, extractor,
+                      input_backend)
 
 
 def main():
