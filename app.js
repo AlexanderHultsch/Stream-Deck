@@ -38,6 +38,9 @@
       .then(function (res) { return res.json(); })
       .then(function (data) {
         showToast(String(data.message), data.ok === true);
+        document.dispatchEvent(new CustomEvent("deck:pressed", {
+          detail: { id: id, ok: data.ok === true, action: data.action }
+        }));
       })
       .catch(function () {
         showToast("Can't reach the PC", false);
@@ -51,6 +54,7 @@
     var tile = document.createElement("button");
     tile.type = "button";
     tile.className = "tile";
+    tile.dataset.id = button.id;
     tile.setAttribute("aria-label", button.name);
     var img = document.createElement("img");
     img.src = "/api/icon/" + encodeURIComponent(button.id);
@@ -83,6 +87,7 @@
       tiles.push(button && typeof button === "object" ? makeTile(button) : makeEmpty());
     }
     grid.replaceChildren.apply(grid, tiles);
+    document.dispatchEvent(new CustomEvent("deck:rendered"));
   }
 
   function load() {

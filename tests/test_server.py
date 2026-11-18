@@ -373,6 +373,7 @@ class StaticTest(ServerTestCase):
             "app.js": "text/javascript",
             "edit.js": "text/javascript",
             "trackpad.js": "text/javascript",
+            "status.js": "text/javascript",
             "manifest.webmanifest": "application/manifest+json",
         }
         for name, ctype in expected.items():
@@ -383,8 +384,8 @@ class StaticTest(ServerTestCase):
             self.assertEqual(body, ("content of " + name).encode("utf-8"))
 
     def test_missing_whitelisted_file_is_404(self):
-        for name in ("style.css", "app.js", "edit.js", "trackpad.js", "manifest.webmanifest",
-                     "index.html"):
+        for name in ("style.css", "app.js", "edit.js", "trackpad.js", "status.js",
+                     "manifest.webmanifest", "index.html"):
             status, _, _ = self.request("GET", "/" + name)
             self.assertEqual(status, 404, name)
         status, _, _ = self.request("GET", "/")

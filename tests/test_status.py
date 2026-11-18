@@ -362,6 +362,20 @@ class ProcessWatcherTest(WatcherTestCase):
         watcher = self.make(watched={})
         self.assertEqual(watcher.subscribe(Recorder()), {})
 
+    def test_no_snapshots_while_nothing_is_watched(self):
+        watcher = self.make(watched={})
+        callback = Recorder()
+        self.assertEqual(watcher.subscribe(callback), {})
+        watcher.kick()
+        settle(0.3)
+        self.assertTrue(watcher.thread.is_alive())
+        self.assertEqual(self.source.calls, 0)
+        self.assertEqual(callback.calls, [])
+        self.watched["steam"] = "steam.exe"
+        self.assertTrue(wait_for(lambda: callback.calls))
+        self.assertEqual(callback.calls, [{"steam": False}])
+        self.assertGreater(self.source.calls, 0)
+
     def test_running_thread_serves_last_state_without_snapshot(self):
         watcher = self.make(interval=60, burst_interval=60)
         self.source.processes = [("steam.exe", 1)]

@@ -59,10 +59,12 @@ function watch(page, problems) {
   });
 }
 
-// Records the page's WebSockets: every sent JSON frame, and whether each socket has closed.
+// Records the page's input WebSockets (/ws, not /ws/status): every sent JSON frame, and whether
+// each socket has closed.
 function record(page) {
   const rec = { sockets: [], frames: [] };
   page.on('websocket', (ws) => {
+    if (!/\/ws$/.test(ws.url())) return;
     const sock = { url: ws.url(), closed: false };
     rec.sockets.push(sock);
     ws.on('framesent', (f) => rec.frames.push(JSON.parse(f.payload)));
@@ -196,7 +198,7 @@ async function run(base) {
       !st.deckHidden && st.padHidden && st.deckSelected === 'true' && st.padSelected === 'false',
       JSON.stringify(st));
     await sleep(300);
-    check('no websocket is opened while Deck is shown', rec.sockets.length === 0, String(rec.sockets.length));
+    check('no input websocket is opened while Deck is shown', rec.sockets.length === 0, String(rec.sockets.length));
     await page.screenshot({ path: path.join(SHOT_DIR, 'deck-portrait.png') });
 
     // ---- 2. websocket lifecycle
@@ -228,7 +230,7 @@ async function run(base) {
     st = await tabState(page);
     check('the Deck choice is remembered the same way', !st.deckHidden && st.padHidden, JSON.stringify(st));
     await sleep(200);
-    check('reloading on Deck opens no websocket', rec.sockets.length === 2, String(rec.sockets.length));
+    check('reloading on Deck opens no input websocket', rec.sockets.length === 2, String(rec.sockets.length));
 
     await page.click('#tab-pad');
     await waitConnected(page);

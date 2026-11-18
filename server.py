@@ -73,6 +73,7 @@ STATIC_TYPES = {
     "app.js": "text/javascript",
     "edit.js": "text/javascript",
     "trackpad.js": "text/javascript",
+    "status.js": "text/javascript",
     "style.css": "text/css",
     "manifest.webmanifest": "application/manifest+json",
 }
@@ -332,6 +333,8 @@ class ProcessWatcher:
     def compute(self):
         try:
             watched = self.get_watched()
+            if not watched:
+                return {}
             names = {name for name, pid in self.source.snapshot()}
         except Exception:
             return None

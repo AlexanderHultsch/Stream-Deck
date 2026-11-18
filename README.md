@@ -41,6 +41,27 @@ The phone page has two tabs at the bottom (left side in landscape): **Deck** and
 - **L / R buttons** (mouse icons, left half and right half highlighted): press and hold for click-and-drag, e.g. hold L and drag a finger on the pad. They are released when you leave the tab, lock the phone or lose the connection.
 - **Keyboard icon**: opens the phone's system keyboard. What you type is sent to the PC (letters, digits, umlauts, symbols, Backspace, Enter). The typed text is never shown on the phone; the chip shows "Keyboard on · N keys sent" instead. Tap the icon again to close the keyboard.
 
+## Status dots
+Tiles with a `Process` set show a small dot in the top-right corner:
+
+- **Green**: the app is running.
+- **Pulsing amber**: starting. Shown after you tap a tile that launched the app, for up to 10 seconds or until the app shows up as running.
+- **No dot**: not running, or the status is unknown (for example while the connection is down).
+
+A running tile's accessible label reads "Name, running".
+
+## Efficiency
+The server is meant to cost almost nothing on a PC that is busy with a game.
+
+| Situation | What runs |
+|---|---|
+| Deck tab shown | Status stream (`/ws/status`). The server checks the process list about every 2 seconds, only while a phone shows the Deck, in-process through the Windows API (no `tasklist`). Only changes are sent. After a tap it checks every 0.5 seconds for 10 seconds. |
+| Trackpad tab shown | Input socket (`/ws`). Nothing is sent while you do not touch the pad. |
+| Screen off, other tab or app hidden | No connection and no work on the PC. |
+| Server idle (no phone connected) | Threads are blocked waiting, no timers, no process checks. |
+
+On Windows the server also lowers its own process priority to "Below normal" so it never competes with a game. Start with `--normal-priority` (`start.bat --normal-priority`) to keep the normal priority. Network sockets use TCP_NODELAY so trackpad input is not delayed.
+
 ## Configure buttons
 Open http://localhost:8765/edit **on the PC**. The editor and saving only work from the PC itself. The deck has 8 slots, shown as "Slot 1" to "Slot 8". Empty slots appear as blank tiles on the phone. Use "Add button" on an empty slot to fill it, "Delete" to empty a slot (the other slots stay where they are), and "Move up" / "Move down" to swap a slot with its neighbour. Nothing is saved until you press Save. Fields:
 
@@ -69,20 +90,21 @@ python3 -m unittest discover tests
 node tests/ui_smoke.js
 node tests/ui_edit.js
 node tests/ui_pad.js
+node tests/ui_status.js
 ```
 
-The three `.js` tests need Node and the `playwright` package with Chromium. They run a server on a free port; `ui_edit.js` works on a temp copy.
+The four `.js` tests need Node and the `playwright` package with Chromium. They run a server on a free port; `ui_edit.js` works on a temp copy.
 
 ## File layout
 ```
 server.py        server (standard library only)
 start.bat        Windows launcher
 buttons.json     port and buttons
-index.html  app.js  trackpad.js  style.css  manifest.webmanifest   phone page
+index.html  app.js  trackpad.js  status.js  style.css  manifest.webmanifest   phone page
 edit.html  edit.js                                    PC-only editor
 logos/           optional logo overrides
 cache/           extracted icons (git-ignored)
-tests/           unit tests, ui_smoke.js, ui_edit.js, ui_pad.js
+tests/           unit tests, ui_smoke.js, ui_edit.js, ui_pad.js, ui_status.js (+ ui_status_server.py)
 ```
 
 ## Windows verification checklist (never run on Windows yet)
@@ -95,7 +117,10 @@ Everything was built and tested on Linux. The Windows-only code paths have not b
 - [ ] SimHub tile starts SimHub, a second tap focuses/restores it, including when minimized
 - [ ] Window = minimized/maximized is honoured for an `.exe` target
 - [ ] Icons are real logos and not the coloured fallback squares for Steam, Discord (the registry handler may be `Update.exe`), SimHub, SimMotion; check edges for dark halos/transparency
-- [ ] `tasklist` decoding with a non-ASCII process name does not error
+- [ ] Status dots turn green within about 2 seconds of an app starting and disappear after it quits (and after a tap within about a second)
+- [ ] Task Manager shows the server at about 0% CPU when idle and "Below normal" priority (Details tab)
+- [ ] The Python process CPU stays low while the Trackpad is used
+- [ ] The mouse still responds when a game maxes the CPU (if not, start with `--normal-priority`)
 - [ ] Editor saves and the phone page shows the change after reopening
 - [ ] Add to Home Screen launches full screen with the deck icon
 - [ ] Trackpad: the pointer moves with a sensible speed (tunable with `GAIN` in `trackpad.js`)
