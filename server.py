@@ -1,6 +1,5 @@
 import argparse
 import base64
-import csv
 import hashlib
 import ipaddress
 import json
@@ -29,7 +28,9 @@ IF_RUNNING = ("focus", "new", "nothing")
 URI_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
 SHOW_COMMANDS = {"normal": 1, "minimized": 2, "maximized": 3}
 SW_RESTORE = 9
-CREATE_NO_WINDOW = 0x08000000
+TH32CS_SNAPPROCESS = 0x00000002
+MAX_PATH = 260
+BELOW_NORMAL_PRIORITY_CLASS = 0x00004000
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
@@ -37,6 +38,10 @@ FALLBACK_SIZE = 128
 WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 WS_MAX_PAYLOAD = 4096
 WS_MAX_CONNECTIONS = 4
+MAX_STATUS_CONNECTIONS = 4
+WATCH_INTERVAL = 2.0
+WATCH_BURST_INTERVAL = 0.5
+WATCH_BURST_SECONDS = 10.0
 WS_PING_INTERVAL = 15
 WS_OP_TEXT = 0x1
 WS_OP_CLOSE = 0x8
@@ -229,25 +234,177 @@ def validate_buttons(buttons):
     return pad_slots(result)
 
 
-def parse_tasklist(text):
-    result = []
-    for row in csv.reader(text.splitlines()):
-        if len(row) < 2:
-            continue
-        try:
-            pid = int(row[1])
-        except ValueError:
-            continue
-        result.append((row[0].lower(), pid))
-    return result
-
-
 def is_uri(target):
     return URI_RE.match(target) is not None
 
 
 def show_command(window):
     return SHOW_COMMANDS.get(window, 1)
+
+
+class DryRunProcessSource:
+    def __init__(self):
+        self.processes = []
+
+    def snapshot(self):
+        return list(self.processes)
+
+
+class WindowsProcessSource:
+    def __init__(self):
+        self.api = None
+        self.load_lock = threading.Lock()
+
+    def structures(self):
+        import ctypes
+        dword = ctypes.c_uint32
+
+        class PROCESSENTRY32W(ctypes.Structure):
+            _fields_ = [("dwSize", dword), ("cntUsage", dword), ("th32ProcessID", dword),
+                        ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", dword),
+                        ("cntThreads", dword), ("th32ParentProcessID", dword),
+                        ("pcPriClassBase", ctypes.c_int32), ("dwFlags", dword),
+                        ("szExeFile", ctypes.c_uint16 * MAX_PATH)]
+
+        return PROCESSENTRY32W
+
+    def load(self):
+        with self.load_lock:
+            if self.api is None:
+                import ctypes
+                entry_type = self.structures()
+                kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+                kernel32.CreateToolhelp32Snapshot.argtypes = [ctypes.c_uint32, ctypes.c_uint32]
+                kernel32.CreateToolhelp32Snapshot.restype = ctypes.c_void_p
+                for name in ("Process32FirstW", "Process32NextW"):
+                    function = getattr(kernel32, name)
+                    function.argtypes = [ctypes.c_void_p, ctypes.POINTER(entry_type)]
+                    function.restype = ctypes.c_int32
+                kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
+                kernel32.CloseHandle.restype = ctypes.c_int32
+                self.api = (kernel32, entry_type)
+            return self.api
+
+    def snapshot(self):
+        import ctypes
+        kernel32, entry_type = self.load()
+        handle = kernel32.CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
+        if not handle or handle == ctypes.c_void_p(-1).value:
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            entry = entry_type()
+            entry.dwSize = ctypes.sizeof(entry_type)
+            pointer = ctypes.pointer(entry)
+            result = []
+            found = kernel32.Process32FirstW(handle, pointer)
+            while found:
+                name = bytes(entry.szExeFile).decode("utf-16-le", "replace").split("\x00")[0]
+                result.append((name.lower(), entry.th32ProcessID))
+                found = kernel32.Process32NextW(handle, pointer)
+            return result
+        finally:
+            kernel32.CloseHandle(handle)
+
+
+def default_process_source():
+    if sys.platform == "win32":
+        return WindowsProcessSource()
+    return DryRunProcessSource()
+
+
+class ProcessWatcher:
+    def __init__(self, source, get_watched, interval=WATCH_INTERVAL,
+                 burst_interval=WATCH_BURST_INTERVAL, burst_seconds=WATCH_BURST_SECONDS,
+                 clock=time.monotonic):
+        self.source = source
+        self.get_watched = get_watched
+        self.interval = interval
+        self.burst_interval = burst_interval
+        self.burst_seconds = burst_seconds
+        self.clock = clock
+        self.lock = threading.Lock()
+        self.subscribers = []
+        self.state = {}
+        self.thread = None
+        self.wake = None
+        self.burst_until = 0.0
+
+    def compute(self):
+        try:
+            watched = self.get_watched()
+            names = {name for name, pid in self.source.snapshot()}
+        except Exception:
+            return None
+        return {bid: process in names for bid, process in watched.items()}
+
+    def subscribe(self, callback):
+        with self.lock:
+            if self.thread is None:
+                self.state = self.compute() or {}
+                self.wake = threading.Event()
+                self.thread = threading.Thread(target=self.run, args=(self.wake,), daemon=True)
+                self.thread.start()
+            self.subscribers.append(callback)
+            return dict(self.state)
+
+    def unsubscribe(self, callback):
+        with self.lock:
+            if callback in self.subscribers:
+                self.subscribers.remove(callback)
+            if not self.subscribers:
+                self.stop_locked()
+
+    def kick(self):
+        with self.lock:
+            if self.subscribers:
+                self.burst_until = self.clock() + self.burst_seconds
+                self.wake.set()
+
+    def shutdown(self):
+        with self.lock:
+            del self.subscribers[:]
+            self.stop_locked()
+
+    def stop_locked(self):
+        if self.wake is not None:
+            self.wake.set()
+        self.wake = None
+        self.thread = None
+        self.burst_until = 0.0
+
+    def run(self, wake):
+        last = self.clock()
+        while True:
+            with self.lock:
+                if self.wake is not wake:
+                    return
+                bursting = self.clock() < self.burst_until
+                cadence = self.burst_interval if bursting else self.interval
+                wake.clear()
+            delay = last + cadence - self.clock()
+            if delay > 0 and wake.wait(delay):
+                continue
+            self.tick(wake)
+            last = self.clock()
+
+    def tick(self, wake):
+        state = self.compute()
+        if state is None:
+            return
+        with self.lock:
+            if self.wake is not wake:
+                return
+            changes = {bid: running for bid, running in state.items()
+                       if self.state.get(bid) != running}
+            self.state = state
+            callbacks = list(self.subscribers)
+        if not changes:
+            return
+        for callback in callbacks:
+            try:
+                callback(dict(changes))
+            except Exception:
+                self.unsubscribe(callback)
 
 
 class DryRunPlatform:
@@ -265,11 +422,12 @@ class DryRunPlatform:
 
 
 class WindowsPlatform:
+    def __init__(self, source=None):
+        self.source = source if source is not None else default_process_source()
+
     def pids(self, process):
-        result = subprocess.run(["tasklist", "/FO", "CSV", "/NH"], capture_output=True,
-                                text=True, errors="replace", creationflags=CREATE_NO_WINDOW)
         wanted = process.lower()
-        return {pid for name, pid in parse_tasklist(result.stdout) if name == wanted}
+        return {pid for name, pid in self.source.snapshot() if name == wanted}
 
     def is_running(self, process):
         return bool(self.pids(process))
@@ -339,9 +497,9 @@ class WindowsPlatform:
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def default_platform():
+def default_platform(source=None):
     if sys.platform == "win32":
-        return WindowsPlatform()
+        return WindowsPlatform(source)
     return DryRunPlatform()
 
 
@@ -557,6 +715,18 @@ class WsReader:
         payload = ws_unmask(self.buf[size:total], mask)
         del self.buf[:total]
         return opcode, payload
+
+
+def set_nodelay(sock):
+    try:
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    except OSError:
+        pass
+
+
+def status_frame(running):
+    payload = json.dumps({"t": "status", "running": running}).encode("utf-8")
+    return ws_encode_frame(WS_OP_TEXT, payload)
 
 
 def ws_call(backend, name, *args):
@@ -920,17 +1090,24 @@ class DeckServer(ThreadingHTTPServer):
     daemon_threads = True
 
     def __init__(self, address, handler, base_dir, loopback_check, platform, extractor,
-                 input_backend=None):
+                 input_backend=None, process_source=None, watcher=None):
         super().__init__(address, handler)
         self.base_dir = base_dir
         self.loopback_check = loopback_check
         self.platform = platform
         self.extractor = extractor
         self.input_backend = input_backend
+        self.process_source = process_source
+        self.watcher = watcher
         self.config_lock = threading.Lock()
         self.ws_ping_interval = WS_PING_INTERVAL
         self.ws_connections = 0
+        self.status_connections = 0
         self.ws_lock = threading.Lock()
+
+    def server_close(self):
+        super().server_close()
+        self.watcher.shutdown()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -966,7 +1143,9 @@ class Handler(BaseHTTPRequestHandler):
         elif path in DECK_ICON_SIZES:
             self.send_body(200, "image/png", deck_icon_png(DECK_ICON_SIZES[path]))
         elif path == "/ws":
-            self.websocket()
+            self.websocket("input")
+        elif path == "/ws/status":
+            self.websocket("status")
         elif path == "/":
             self.send_static("index.html")
         elif path == "/edit":
@@ -1072,7 +1251,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         for button in buttons:
             if button is not None and button.get("id") == button_id:
-                self.send_json(200, press_button(button, self.server.platform))
+                result = press_button(button, self.server.platform)
+                if result["ok"]:
+                    self.server.watcher.kick()
+                self.send_json(200, result)
                 return
         self.send_json(404, {"ok": False, "action": "error", "message": "unknown button"})
 
@@ -1093,22 +1275,41 @@ class Handler(BaseHTTPRequestHandler):
             return False
         return netloc != "" and netloc == self.headers.get("Host", "").strip().lower()
 
-    def websocket(self):
+    def ws_acquire(self, channel):
+        server = self.server
+        with server.ws_lock:
+            if channel == "status":
+                accepted = server.status_connections < MAX_STATUS_CONNECTIONS
+                if accepted:
+                    server.status_connections += 1
+            else:
+                accepted = server.ws_connections < WS_MAX_CONNECTIONS
+                if accepted:
+                    server.ws_connections += 1
+        return accepted
+
+    def ws_free(self, channel):
+        server = self.server
+        with server.ws_lock:
+            if channel == "status":
+                server.status_connections -= 1
+            else:
+                server.ws_connections -= 1
+
+    def websocket(self, channel):
         if not self.is_ws_upgrade():
             self.send_error_json(400, "websocket upgrade required")
             return
         if not self.ws_origin_allowed():
             self.send_error_json(403, "forbidden")
             return
-        server = self.server
-        with server.ws_lock:
-            accepted = server.ws_connections < WS_MAX_CONNECTIONS
-            if accepted:
-                server.ws_connections += 1
-        if not accepted:
+        if not self.ws_acquire(channel):
             self.send_error_json(503, "too many connections")
             return
         self.ws_held = set()
+        self.ws_subscribed = False
+        self.ws_closed = False
+        self.ws_send_lock = threading.Lock()
         self.close_connection = True
         try:
             accept = ws_accept_key(self.headers["Sec-WebSocket-Key"].strip())
@@ -1116,21 +1317,44 @@ class Handler(BaseHTTPRequestHandler):
                               "Upgrade: websocket\r\n"
                               "Connection: Upgrade\r\n"
                               "Sec-WebSocket-Accept: %s\r\n\r\n" % accept).encode("ascii"))
-            self.ws_loop()
+            set_nodelay(self.connection)
+            if channel == "status":
+                self.status_start()
+            self.ws_loop(channel)
         except OSError:
             pass
         finally:
             self.ws_release()
-            with server.ws_lock:
-                server.ws_connections -= 1
+            self.ws_free(channel)
+
+    def ws_send(self, frame, closing=False):
+        with self.ws_send_lock:
+            if self.ws_closed:
+                return False
+            if closing:
+                self.ws_closed = True
+            self.connection.sendall(frame)
+            return True
+
+    def status_start(self):
+        with self.ws_send_lock:
+            self.ws_subscribed = True
+            running = self.server.watcher.subscribe(self.status_notify)
+            self.connection.sendall(status_frame(running))
+
+    def status_notify(self, changes):
+        self.ws_send(status_frame(changes))
 
     def ws_release(self):
+        if self.ws_subscribed:
+            self.ws_subscribed = False
+            self.server.watcher.unsubscribe(self.status_notify)
         held = sorted(self.ws_held)
         self.ws_held.clear()
         for name in held:
             ws_call(self.server.input_backend, "button", name, False)
 
-    def ws_loop(self):
+    def ws_loop(self, channel):
         sock = self.connection
         sock.settimeout(self.server.ws_ping_interval)
         reader = WsReader(sock)
@@ -1142,7 +1366,7 @@ class Handler(BaseHTTPRequestHandler):
             except socket.timeout:
                 if outstanding:
                     return
-                sock.sendall(ws_encode_frame(WS_OP_PING))
+                self.ws_send(ws_encode_frame(WS_OP_PING))
                 outstanding = True
                 continue
             except WsError as e:
@@ -1150,16 +1374,17 @@ class Handler(BaseHTTPRequestHandler):
                 return
             outstanding = False
             if opcode == WS_OP_TEXT:
-                ws_dispatch(backend, self.ws_held, payload)
+                if channel == "input":
+                    ws_dispatch(backend, self.ws_held, payload)
             elif opcode == WS_OP_PING:
-                sock.sendall(ws_encode_frame(WS_OP_PONG, payload))
+                self.ws_send(ws_encode_frame(WS_OP_PONG, payload))
             elif opcode == WS_OP_CLOSE:
                 self.ws_close(payload[:2] if len(payload) >= 2 else b"")
                 return
 
     def ws_close(self, payload):
         sock = self.connection
-        sock.sendall(ws_encode_frame(WS_OP_CLOSE, payload))
+        self.ws_send(ws_encode_frame(WS_OP_CLOSE, payload), closing=True)
         self.ws_release()
         try:
             sock.shutdown(socket.SHUT_WR)
@@ -1171,23 +1396,62 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
 
+def watched_processes(base_dir):
+    try:
+        buttons = stored_slots(read_config(base_dir))
+    except (OSError, ValueError):
+        return {}
+    result = {}
+    for button in buttons:
+        if button is None:
+            continue
+        bid, process = button.get("id"), button.get("process")
+        if isinstance(bid, str) and isinstance(process, str) and process.strip():
+            result[bid] = process.strip().lower()
+    return result
+
+
+def lower_priority(kernel32=None):
+    try:
+        if kernel32 is None:
+            import ctypes
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel32.GetCurrentProcess.argtypes = []
+            kernel32.GetCurrentProcess.restype = ctypes.c_void_p
+            kernel32.SetPriorityClass.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+            kernel32.SetPriorityClass.restype = ctypes.c_int32
+        return bool(kernel32.SetPriorityClass(kernel32.GetCurrentProcess(),
+                                              BELOW_NORMAL_PRIORITY_CLASS))
+    except Exception:
+        return False
+
+
 def create_server(base_dir, host="127.0.0.1", port=0, loopback_check=is_loopback, platform=None,
-                  extractor=None, input_backend=None):
+                  extractor=None, input_backend=None, process_source=None):
     ensure_config(base_dir)
+    if process_source is None:
+        process_source = default_process_source()
     if platform is None:
-        platform = default_platform()
+        platform = default_platform(process_source)
     if extractor is None:
         extractor = default_extractor()
     if input_backend is None:
         input_backend = default_input()
+    watcher = ProcessWatcher(process_source, lambda: watched_processes(base_dir))
     return DeckServer((host, port), Handler, base_dir, loopback_check, platform, extractor,
-                      input_backend)
+                      input_backend, process_source, watcher)
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(description="Stream Deck server")
+    parser.add_argument("--port", type=int, help="port to listen on (default: from buttons.json)")
+    parser.add_argument("--normal-priority", action="store_true",
+                        help="do not lower the server's process priority (Windows)")
+    return parser
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Stream Deck server")
-    parser.add_argument("--port", type=int, help="port to listen on (default: from buttons.json)")
-    args = parser.parse_args()
+    args = build_parser().parse_args()
     base_dir = os.path.dirname(os.path.abspath(__file__))
     ensure_config(base_dir)
     port = args.port or read_config(base_dir).get("port", DEFAULT_PORT)
@@ -1195,6 +1459,8 @@ def main():
     print("Stream Deck running")
     print("  PC:    http://localhost:%d" % port)
     print("  Phone: http://%s:%d" % (lan_ip(), port))
+    if sys.platform == "win32" and not args.normal_priority and lower_priority():
+        print("  Priority: below normal (start with --normal-priority to disable)")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -139,23 +139,6 @@ class PressButtonTest(unittest.TestCase):
         self.assertEqual(platform.calls[-1], ("launch", "steam://open/main", "normal"))
 
 
-class ParseTasklistTest(unittest.TestCase):
-    def test_normal_rows(self):
-        text = '"System","4","Services","0","1,000 K"\r\n"Discord.exe","1234","Console","1","80 K"\r\n'
-        self.assertEqual(server.parse_tasklist(text), [("system", 4), ("discord.exe", 1234)])
-
-    def test_quoted_names_with_spaces(self):
-        text = '"Some App Name.exe","77","Console","1","10 K"\n'
-        self.assertEqual(server.parse_tasklist(text), [("some app name.exe", 77)])
-
-    def test_malformed_rows_skipped(self):
-        text = '"only-one-field"\n"bad.exe","notanumber","x"\n\n"ok.exe","5","x"\n'
-        self.assertEqual(server.parse_tasklist(text), [("ok.exe", 5)])
-
-    def test_empty_string(self):
-        self.assertEqual(server.parse_tasklist(""), [])
-
-
 class HelpersTest(unittest.TestCase):
     def test_is_uri(self):
         self.assertTrue(server.is_uri("steam://open/main"))

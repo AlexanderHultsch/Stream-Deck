@@ -30,7 +30,7 @@ def wait_for(predicate, timeout=TIMEOUT):
 
 
 class WsClient:
-    def __init__(self, port, headers=None):
+    def __init__(self, port, headers=None, path="/ws"):
         self.port = port
         self.sock = socket.create_connection(("127.0.0.1", port), timeout=TIMEOUT)
         self.buf = bytearray()
@@ -43,7 +43,7 @@ class WsClient:
             "Sec-WebSocket-Version": "13",
         }
         request.update(headers or {})
-        lines = ["GET /ws HTTP/1.1"]
+        lines = ["GET %s HTTP/1.1" % path]
         lines += ["%s: %s" % (k, v) for k, v in request.items() if v is not None]
         self.sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("ascii"))
         self.status, self.headers, self.body = self.read_response()
