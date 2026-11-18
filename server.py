@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 DEFAULT_PORT = 8765
 MAX_BODY = 64 * 1024
 MAX_DRAIN = 1024 * 1024
-MAX_BUTTONS = 40
+SLOTS = 8
 MAX_NAME = 40
 CONFIG_NAME = "buttons.json"
 SLUG_RE = re.compile(r"^[a-z0-9-]+$")
@@ -108,9 +108,19 @@ def write_config(base_dir, config):
         raise
 
 
+def pad_slots(items):
+    slots = [item if isinstance(item, dict) else None for item in items[:SLOTS]]
+    return slots + [None] * (SLOTS - len(slots))
+
+
+def stored_slots(config):
+    items = config.get("buttons", [])
+    return pad_slots(items if isinstance(items, list) else [])
+
+
 def ensure_config(base_dir):
     if not os.path.exists(config_path(base_dir)):
-        write_config(base_dir, {"port": DEFAULT_PORT, "buttons": DEFAULT_BUTTONS})
+        write_config(base_dir, {"port": DEFAULT_PORT, "buttons": pad_slots(DEFAULT_BUTTONS)})
 
 
 def slugify(name):
@@ -149,8 +159,8 @@ def choice_field(item, key, allowed):
 def validate_buttons(buttons):
     if not isinstance(buttons, list):
         raise ValidationError("buttons must be a list")
-    if len(buttons) > MAX_BUTTONS:
-        raise ValidationError("too many buttons (max %d)" % MAX_BUTTONS)
+    if len(buttons) > SLOTS:
+        raise ValidationError("too many slots (max %d)" % SLOTS)
     used = set()
     for item in buttons:
         if isinstance(item, dict) and item.get("id"):
@@ -162,8 +172,11 @@ def validate_buttons(buttons):
             used.add(bid)
     result = []
     for item in buttons:
+        if item is None:
+            result.append(None)
+            continue
         if not isinstance(item, dict):
-            raise ValidationError("each button must be an object")
+            raise ValidationError("each slot must be an object or null")
         name = text_field(item, "name")
         if not name:
             raise ValidationError("name must not be empty")
@@ -183,7 +196,7 @@ def validate_buttons(buttons):
             "window": choice_field(item, "window", WINDOWS),
             "ifRunning": choice_field(item, "ifRunning", IF_RUNNING),
         })
-    return result
+    return pad_slots(result)
 
 
 def parse_tasklist(text):
@@ -682,16 +695,16 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, ValueError):
             self.send_error_json(500, "cannot read " + CONFIG_NAME)
             return
-        self.send_json(200, {"buttons": config.get("buttons", [])})
+        self.send_json(200, {"buttons": stored_slots(config)})
 
     def get_icon(self, button_id):
         try:
-            buttons = read_config(self.server.base_dir).get("buttons", [])
+            buttons = stored_slots(read_config(self.server.base_dir))
         except (OSError, ValueError):
             self.send_error_json(500, "cannot read " + CONFIG_NAME)
             return
         for button in buttons:
-            if button.get("id") == button_id:
+            if button is not None and button.get("id") == button_id:
                 content_type, body = icon_response(self.server.base_dir, button,
                                                    self.server.extractor)
                 self.send_body(200, content_type, body, (("Cache-Control", "no-cache"),))
@@ -740,12 +753,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def press(self, button_id):
         try:
-            buttons = read_config(self.server.base_dir).get("buttons", [])
+            buttons = stored_slots(read_config(self.server.base_dir))
         except (OSError, ValueError):
             self.send_error_json(500, "cannot read " + CONFIG_NAME)
             return
         for button in buttons:
-            if button.get("id") == button_id:
+            if button is not None and button.get("id") == button_id:
                 self.send_json(200, press_button(button, self.server.platform))
                 return
         self.send_json(404, {"ok": False, "action": "error", "message": "unknown button"})

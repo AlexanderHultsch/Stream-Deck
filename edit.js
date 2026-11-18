@@ -2,13 +2,14 @@
   "use strict";
 
   var list = document.getElementById("list");
-  var addButton = document.getElementById("add");
   var saveButton = document.getElementById("save");
   var dirtyNote = document.getElementById("dirty");
   var status = document.getElementById("status");
 
   var WINDOWS = [["normal", "Normal"], ["minimized", "Minimized"], ["maximized", "Maximized"]];
   var IF_RUNNING = [["focus", "Focus window"], ["new", "Start another"], ["nothing", "Do nothing"]];
+
+  var SLOTS = 8;
 
   var buttons = [];
   var savedSnapshot = "[]";
@@ -38,6 +39,7 @@
   }
 
   function payloadOf(button) {
+    if (!button) return null;
     var out = {};
     if (button.id) out.id = button.id;
     out.name = button.name;
@@ -71,7 +73,11 @@
   }
 
   function setButtons(items) {
-    buttons = items.map(fromServer);
+    buttons = [];
+    for (var i = 0; i < SLOTS; i++) {
+      var item = items[i];
+      buttons.push(item && typeof item === "object" ? fromServer(item) : null);
+    }
     savedSnapshot = snapshot();
     iconStamp = Date.now();
   }
@@ -137,7 +143,46 @@
     return el;
   }
 
+  function makeSlotTitle(index) {
+    var title = document.createElement("h2");
+    title.className = "slot-title";
+    title.textContent = "Slot " + (index + 1);
+    return title;
+  }
+
+  function makeMoveActions(index, label) {
+    var up = makeAction("Move up", "btn-up", function () { move(index, -1, "btn-up"); }, index === 0);
+    var down = makeAction("Move down", "btn-down", function () { move(index, 1, "btn-down"); },
+      index === SLOTS - 1);
+    up.setAttribute("aria-label", "Move " + label + " up");
+    down.setAttribute("aria-label", "Move " + label + " down");
+    return [up, down];
+  }
+
+  function makeEmptyCard(index) {
+    var card = document.createElement("li");
+    card.className = "card slot-empty";
+
+    var head = document.createElement("div");
+    head.className = "slot-head";
+    var note = document.createElement("span");
+    note.className = "muted";
+    note.textContent = "Empty slot";
+    head.append(makeSlotTitle(index), note);
+
+    var actions = document.createElement("div");
+    actions.className = "actions";
+    var add = makeAction("Add button", "btn-add", function () { addAt(index); }, false);
+    add.setAttribute("aria-label", "Add button to slot " + (index + 1));
+    actions.append(add);
+    actions.append.apply(actions, makeMoveActions(index, "slot " + (index + 1)));
+
+    card.append(head, actions);
+    return card;
+  }
+
   function makeCard(button, index) {
+    if (!button) return makeEmptyCard(index);
     var card = document.createElement("li");
     card.className = "card";
 
@@ -184,17 +229,13 @@
 
     var actions = document.createElement("div");
     actions.className = "actions";
-    var up = makeAction("Move up", "btn-up", function () { move(button, -1, "btn-up"); }, index === 0);
-    var down = makeAction("Move down", "btn-down", function () { move(button, 1, "btn-down"); },
-      index === buttons.length - 1);
-    var del = makeAction("Delete", "btn-delete danger", function () { remove(button); }, false);
-    var label = button.name || "button " + (index + 1);
-    up.setAttribute("aria-label", "Move " + label + " up");
-    down.setAttribute("aria-label", "Move " + label + " down");
+    var label = button.name || "slot " + (index + 1);
+    var del = makeAction("Delete", "btn-delete danger", function () { remove(index); }, false);
     del.setAttribute("aria-label", "Delete " + label);
-    actions.append(up, down, del);
+    actions.append.apply(actions, makeMoveActions(index, label));
+    actions.append(del);
 
-    card.append(side, fields, actions);
+    card.append(makeSlotTitle(index), side, fields, actions);
     return card;
   }
 
@@ -202,7 +243,7 @@
     if (!buttons.length) {
       var empty = document.createElement("li");
       empty.className = "empty muted";
-      empty.textContent = loaded ? "No buttons yet. Use Add button to create one." : "Loading…";
+      empty.textContent = "Loading…";
       list.replaceChildren(empty);
     } else {
       list.replaceChildren.apply(list, buttons.map(makeCard));
@@ -210,8 +251,7 @@
     refreshDirty();
   }
 
-  function focusIn(button, selector) {
-    var index = buttons.indexOf(button);
+  function focusIn(index, selector) {
     var card = list.children[index];
     var target = card && card.querySelector(selector);
     if (target && target.disabled) target = null;
@@ -219,34 +259,30 @@
     return !!target;
   }
 
-  function move(button, delta, selector) {
-    var from = buttons.indexOf(button);
+  function move(from, delta, selector) {
     var to = from + delta;
-    if (to < 0 || to >= buttons.length) return;
-    buttons.splice(from, 1);
-    buttons.splice(to, 0, button);
+    if (to < 0 || to >= SLOTS) return;
+    var moved = buttons[from];
+    buttons[from] = buttons[to];
+    buttons[to] = moved;
     render();
     touch();
-    if (!focusIn(button, "." + selector)) focusIn(button, delta < 0 ? ".btn-down" : ".btn-up");
+    if (!focusIn(to, "." + selector)) focusIn(to, delta < 0 ? ".btn-down" : ".btn-up");
   }
 
-  function remove(button) {
-    var index = buttons.indexOf(button);
-    buttons.splice(index, 1);
+  function remove(index) {
+    buttons[index] = null;
     render();
     touch();
-    var next = buttons[index] || buttons[index - 1];
-    if (next) focusIn(next, ".btn-delete");
-    else addButton.focus();
+    focusIn(index, ".btn-add");
   }
 
-  function add() {
-    if (!loaded || saving) return;
-    var button = fromServer();
-    buttons.push(button);
+  function addAt(index) {
+    if (!loaded || saving || buttons[index]) return;
+    buttons[index] = fromServer();
     render();
     touch();
-    focusIn(button, ".f-name");
+    focusIn(index, ".f-name");
   }
 
   function save() {
@@ -294,7 +330,6 @@
       .then(function (data) {
         setButtons(Array.isArray(data.buttons) ? data.buttons : []);
         loaded = true;
-        addButton.disabled = false;
         saveButton.disabled = false;
         render();
       })
@@ -304,7 +339,6 @@
       });
   }
 
-  addButton.addEventListener("click", add);
   saveButton.addEventListener("click", save);
   window.addEventListener("beforeunload", function (event) {
     if (!isDirty()) return;

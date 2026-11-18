@@ -32,6 +32,10 @@
       "process": "",
       "window": "normal",
       "ifRunning": "focus"
-    }
+    },
+    null,
+    null,
+    null,
+    null
   ]
 }

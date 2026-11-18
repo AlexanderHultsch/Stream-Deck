@@ -50,11 +50,22 @@ function watch(page, problems) {
   });
 }
 
-async function noHorizontalOverflow(page) {
-  return page.evaluate(() => ({
-    scroll: document.documentElement.scrollWidth,
-    inner: window.innerWidth,
-  }));
+async function layout(page) {
+  return page.evaluate(() => {
+    const rects = [...document.querySelectorAll('#grid > *')].map((el) => {
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+    });
+    return {
+      rects,
+      columns: new Set(rects.map((r) => r.x)).size,
+      rows: new Set(rects.map((r) => r.y)).size,
+      scrollW: document.documentElement.scrollWidth,
+      scrollH: document.documentElement.scrollHeight,
+      innerW: window.innerWidth,
+      innerH: window.innerHeight,
+    };
+  });
 }
 
 async function run(base) {
@@ -68,26 +79,50 @@ async function run(base) {
     await page.goto(base + '/');
     await page.waitForSelector('.tile');
 
-    const labels = await page.$$eval('.tile', (tiles) =>
-      tiles.map((t) => t.querySelector('.label').textContent));
-    check('4 tiles in order Steam, Discord, SimHub, SimMotion',
+    const kinds = await page.$$eval('#grid > *', (els) => els.map((el) => ({
+      tag: el.tagName, tile: el.classList.contains('tile'), empty: el.classList.contains('empty'),
+      label: el.querySelector('.label') ? el.querySelector('.label').textContent : null,
+      text: el.textContent, imgs: el.querySelectorAll('img').length,
+      ariaHidden: el.getAttribute('aria-hidden'),
+    })));
+    check('grid has exactly 8 children', kinds.length === 8, String(kinds.length));
+    const labels = kinds.slice(0, 4).map((k) => k.label);
+    check('first 4 slots are .tile buttons in order Steam, Discord, SimHub, SimMotion',
+      kinds.slice(0, 4).every((k) => k.tag === 'BUTTON' && k.tile && !k.empty) &&
       JSON.stringify(labels) === JSON.stringify(['Steam', 'Discord', 'SimHub', 'SimMotion']),
-      JSON.stringify(labels));
+      JSON.stringify(kinds.slice(0, 4)));
+    check('last 4 slots are .tile.empty, not buttons, with no label, icon or text',
+      kinds.slice(4).every((k) => k.tag === 'DIV' && k.tile && k.empty && k.label === null &&
+        k.imgs === 0 && k.text === '' && k.ariaHidden === 'true'),
+      JSON.stringify(kinds.slice(4)));
+    check('only the 4 filled slots are buttons', (await page.locator('#grid button').count()) === 4);
 
     await page.waitForFunction(() =>
       [...document.querySelectorAll('.tile img')].every((i) => i.complete));
     const imgs = await page.$$eval('.tile img', (list) =>
       list.map((i) => ({ complete: i.complete, w: i.naturalWidth })));
-    check('every tile icon loaded',
+    check('icons loaded for the 4 filled tiles',
       imgs.length === 4 && imgs.every((i) => i.complete && i.w > 0), JSON.stringify(imgs));
 
-    const xs = await page.$$eval('.tile', (tiles) =>
-      tiles.map((t) => Math.round(t.getBoundingClientRect().x)));
-    const columns = new Set(xs).size;
-    check('portrait grid has 2 columns', columns === 2, 'x positions ' + xs.join(','));
-    const pOver = await noHorizontalOverflow(page);
-    check('portrait has no horizontal overflow', pOver.scroll <= pOver.inner,
-      pOver.scroll + ' > ' + pOver.inner);
+    const pLayout = await layout(page);
+    check('portrait grid is 2 columns x 4 rows',
+      pLayout.columns === 2 && pLayout.rows === 4,
+      pLayout.columns + ' x ' + pLayout.rows);
+    check('portrait tiles are laid out in slot order (row by row)',
+      pLayout.rects.every((r, i) => i === 0 || r.y > pLayout.rects[i - 1].y ||
+        (r.y === pLayout.rects[i - 1].y && r.x > pLayout.rects[i - 1].x)),
+      JSON.stringify(pLayout.rects));
+    check('portrait has no horizontal overflow', pLayout.scrollW <= pLayout.innerW,
+      pLayout.scrollW + ' > ' + pLayout.innerW);
+    check('portrait does not scroll vertically', pLayout.scrollH <= pLayout.innerH,
+      pLayout.scrollH + ' > ' + pLayout.innerH);
+    const pIcon = await page.$eval('.tile img', (img) => {
+      const t = img.closest('.tile').getBoundingClientRect();
+      const r = img.getBoundingClientRect();
+      return { iw: r.width, ih: r.height, tw: t.width, th: t.height };
+    });
+    check('portrait icon is at most 50% of the tile height and fits inside the tile',
+      pIcon.ih <= pIcon.th * 0.5 + 1 && pIcon.iw <= pIcon.tw, JSON.stringify(pIcon));
     await page.screenshot({ path: path.join(SHOT_DIR, 'portrait.png') });
 
     await page.click('.tile:nth-child(1)');
@@ -116,9 +151,26 @@ async function run(base) {
     await lpage.waitForSelector('.tile');
     await lpage.waitForFunction(() =>
       [...document.querySelectorAll('.tile img')].every((i) => i.complete));
-    const lOver = await noHorizontalOverflow(lpage);
-    check('landscape has no horizontal overflow', lOver.scroll <= lOver.inner,
-      lOver.scroll + ' > ' + lOver.inner);
+    check('landscape grid has 8 children',
+      (await lpage.locator('#grid > *').count()) === 8);
+    const lLayout = await layout(lpage);
+    check('landscape grid is 4 columns x 2 rows',
+      lLayout.columns === 4 && lLayout.rows === 2, lLayout.columns + ' x ' + lLayout.rows);
+    check('landscape has no horizontal overflow', lLayout.scrollW <= lLayout.innerW,
+      lLayout.scrollW + ' > ' + lLayout.innerW);
+    check('landscape does not scroll vertically', lLayout.scrollH <= lLayout.innerH,
+      lLayout.scrollH + ' > ' + lLayout.innerH);
+    const lIcon = await lpage.$eval('.tile img', (img) => {
+      const tile = img.closest('.tile');
+      const t = tile.getBoundingClientRect();
+      const r = img.getBoundingClientRect();
+      const label = tile.querySelector('.label').getBoundingClientRect();
+      return { iw: r.width, ih: r.height, tw: t.width, th: t.height,
+        iconTop: r.top, labelBottom: label.bottom, tileTop: t.top, tileBottom: t.bottom };
+    });
+    check('landscape icon is at most 50% of the tile height and icon + label fit in the tile',
+      lIcon.ih <= lIcon.th * 0.5 + 1 && lIcon.iconTop >= lIcon.tileTop &&
+      lIcon.labelBottom <= lIcon.tileBottom, JSON.stringify(lIcon));
     await lpage.screenshot({ path: path.join(SHOT_DIR, 'landscape.png') });
 
     const hrefs = await page.evaluate(() => ({

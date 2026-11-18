@@ -274,6 +274,17 @@ class IconEndpointTest(unittest.TestCase):
         self.assertEqual(decode_rgba(body), self.extractor.result)
         self.assertEqual(self.extractor.targets, ["steam://open/main"])
 
+    def test_icon_served_with_null_slots_around(self):
+        steam = server.DEFAULT_BUTTONS[0]
+        discord = server.DEFAULT_BUTTONS[1]
+        with open(os.path.join(self.base_dir, "buttons.json"), "w", encoding="utf-8") as f:
+            json.dump({"port": 8765, "buttons": [None, steam, None, None, discord]}, f)
+        for bid in ("discord", "steam"):
+            status, resp, body = self.get("/api/icon/" + bid)
+            self.assertEqual((status, body[:8]), (200, SIGNATURE), bid)
+        status, resp, body = self.get("/api/icon/nope")
+        self.assertEqual(status, 404)
+
     def test_logo_override_served(self):
         os.makedirs(os.path.join(self.base_dir, "logos"))
         with open(os.path.join(self.base_dir, "logos", "steam.svg"), "wb") as f:

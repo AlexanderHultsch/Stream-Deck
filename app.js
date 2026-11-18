@@ -1,6 +1,7 @@
 (function () {
   "use strict";
 
+  var SLOTS = 8;
   var grid = document.getElementById("grid");
   var toast = document.getElementById("toast");
   var toastTimer = null;
@@ -64,13 +65,20 @@
     return tile;
   }
 
+  function makeEmpty() {
+    var tile = document.createElement("div");
+    tile.className = "tile empty";
+    tile.setAttribute("aria-hidden", "true");
+    return tile;
+  }
+
   function render(buttons) {
-    if (!buttons.length) {
-      var port = location.port ? ":" + location.port : "";
-      showMessage("No buttons yet. Open http://localhost" + port + "/edit on the PC to add some.");
-      return;
+    var tiles = [];
+    for (var i = 0; i < SLOTS; i++) {
+      var button = buttons[i];
+      tiles.push(button && typeof button === "object" ? makeTile(button) : makeEmpty());
     }
-    grid.replaceChildren.apply(grid, buttons.map(makeTile));
+    grid.replaceChildren.apply(grid, tiles);
   }
 
   function load() {

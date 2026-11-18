@@ -19,7 +19,9 @@ Multiple pages or folders, hotkey or macro actions, running-status dots, auto-st
 | Config | `buttons.json` next to the server. Edited through the PC-side editor. Read on every page load. |
 
 ## Buttons
-Each button in `buttons.json`:
+The deck has exactly **8 slots**. `buttons.json` holds `{"port": 8765, "buttons": [...]}` where `buttons` is the slot list in order: each entry is a button object or `null` (empty slot). The server always serves and stores 8 entries: a shorter list is padded with `null`, a longer one is cut to the first 8.
+
+Each button object in `buttons.json`:
 
 | Field | Meaning |
 |---|---|
@@ -34,15 +36,17 @@ Defaults:
 - Steam: `steam://open/main`.
 - Discord: `discord://`. This avoids the versioned `app-x.y.z` folder and the `Update.exe --processStart` arguments.
 - SimHub and SimMotion: exe paths, set in the editor.
+- Slots 1 to 4 hold these four buttons, slots 5 to 8 are empty.
 
 ## Editor
 - Served at `http://localhost:<PORT>/edit` **on the PC only**. The server refuses all write endpoints from non-loopback addresses.
-- Add, remove, reorder and edit buttons. Fields as in the table above.
+- Shows the 8 slots as cards "Slot 1" to "Slot 8". Edit the fields of a filled slot as in the table above. An empty slot has an "Add button" action that turns it into a new blank button.
+- Move up / Move down swap a slot with its neighbour (empty slots included). Delete empties the slot in place; the other slots do not shift. Nothing is saved until Save, which sends all 8 entries (`null` for empty slots).
 - A real file picker is not possible in a browser, so the exe path is typed or pasted. Not included in v1.
 - Because writes are localhost-only, the "no protection" choice stays safe in practice: the phone can only tap.
 
 ## Phone UI
-- Dark theme, big square tiles in a fixed grid. Portrait and landscape. The grid wraps when more buttons are added.
+- Dark theme, 8 tiles in a fixed grid that fills the screen without scrolling: 2 columns x 4 rows in portrait, 4 columns x 2 rows in landscape. Empty slots show as dim dashed blank tiles that do nothing.
 - Installable: `apple-mobile-web-app-capable`, `apple-touch-icon`, web manifest, so it runs full screen from the home screen.
 - Press feedback: tile flash and a short vibration where iOS allows it (iOS Safari does not support `navigator.vibrate`, so expect the visual flash only), plus a success or error toast from the server's response.
 - No running indicator in v1.

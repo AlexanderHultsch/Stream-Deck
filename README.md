@@ -32,7 +32,7 @@ Change `localport` if you use another port.
 Open the Phone URL in Safari. For a full-screen app, tap Share, then Add to Home Screen.
 
 ## Configure buttons
-Open http://localhost:8765/edit **on the PC**. The editor and saving only work from the PC itself. Add, remove, reorder and edit buttons. Fields:
+Open http://localhost:8765/edit **on the PC**. The editor and saving only work from the PC itself. The deck has 8 slots, shown as "Slot 1" to "Slot 8". Empty slots appear as blank tiles on the phone. Use "Add button" on an empty slot to fill it, "Delete" to empty a slot (the other slots stay where they are), and "Move up" / "Move down" to swap a slot with its neighbour. Nothing is saved until you press Save. Fields:
 
 - **Name**: label under the logo.
 - **Target**: an `.exe` path or a URI such as `steam://open/main` or `discord://`.

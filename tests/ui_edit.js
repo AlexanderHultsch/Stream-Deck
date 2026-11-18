@@ -45,21 +45,18 @@ async function apiButtons(base) {
   return (await res.json()).buttons;
 }
 
-const names = (list) => list.map((b) => b.name);
+const slotIds = (list) => list.map((b) => (b ? b.id : null));
+const slotNames = (list) => list.map((b) => (b ? b.name : null));
 
 async function cardNames(page) {
-  return page.$$eval('.card .f-name', (inputs) => inputs.map((i) => i.value));
+  return page.$$eval('.card', (cards) => cards.map((card) => {
+    const input = card.querySelector('.f-name');
+    return input ? input.value : null;
+  }));
 }
 
 async function statusState(page) {
   return page.$eval('#status', (s) => ({ text: s.textContent, cls: [...s.classList] }));
-}
-
-async function cardIndexByName(page, name) {
-  const all = await cardNames(page);
-  const index = all.indexOf(name);
-  if (index < 0) throw new Error('no card named ' + name + ' in ' + JSON.stringify(all));
-  return index;
 }
 
 async function save(page) {
@@ -96,14 +93,26 @@ async function run(base) {
 
     // 1
     let shown = await cardNames(page);
-    check('4 cards shown with names Steam, Discord, SimHub, SimMotion',
-      JSON.stringify(shown) === JSON.stringify(['Steam', 'Discord', 'SimHub', 'SimMotion']),
+    check('8 slot cards: Steam, Discord, SimHub, SimMotion, then 4 empty',
+      JSON.stringify(shown) === JSON.stringify(
+        ['Steam', 'Discord', 'SimHub', 'SimMotion', null, null, null, null]),
       JSON.stringify(shown));
+    check('4 filled cards and 4 empty cards',
+      (await page.locator('.card:not(.slot-empty)').count()) === 4 &&
+      (await page.locator('.card.slot-empty').count()) === 4);
+    const titles = await page.$$eval('.card .slot-title', (list) => list.map((t) => t.textContent));
+    check('cards are labelled Slot 1 ... Slot 8 in order',
+      JSON.stringify(titles) === JSON.stringify(
+        [1, 2, 3, 4, 5, 6, 7, 8].map((n) => 'Slot ' + n)), JSON.stringify(titles));
+    check('empty cards say "Empty slot" and offer an Add button',
+      (await page.locator('.card.slot-empty').first().textContent()).includes('Empty slot') &&
+      (await page.locator('.card.slot-empty .btn-add').count()) === 4);
+    check('the global Add button is gone', (await page.locator('#add').count()) === 0);
     await page.waitForFunction(() =>
       [...document.querySelectorAll('.card img.icon')].every((i) => i.complete));
     const icons = await page.$$eval('.card img.icon', (list) =>
       list.map((i) => ({ w: i.naturalWidth, h: i.getBoundingClientRect().height })));
-    check('every card shows a loaded 56px icon',
+    check('every filled card shows a loaded 56px icon',
       icons.length === 4 && icons.every((i) => i.w > 0 && Math.round(i.h) === 56),
       JSON.stringify(icons));
 
@@ -127,64 +136,90 @@ async function run(base) {
     check('API shows Steam X, minimized, nothing, id still "steam"',
       api[0].name === 'Steam X' && api[0].window === 'minimized' &&
       api[0].ifRunning === 'nothing' && api[0].id === 'steam', JSON.stringify(api[0]));
+    check('API still has 8 slots with 4 nulls after the save',
+      api.length === 8 && api.slice(4).every((b) => b === null), JSON.stringify(api));
     await page.waitForFunction(() =>
       [...document.querySelectorAll('.card img.icon')].every((i) => i.complete));
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: path.join(SHOT_DIR, 'editor.png') });
 
     // 3
-    await page.click('#add');
+    const slot6 = page.locator('.card').nth(5);
+    await slot6.locator('.btn-add').click();
     const focusedIsName = await page.evaluate(() =>
       document.activeElement && document.activeElement.classList.contains('f-name'));
-    check('Add button appends a card and focuses its name input',
-      (await page.locator('.card').count()) === 5 && focusedIsName);
-    const fresh = page.locator('.card').nth(4);
-    const placeholder = await fresh.locator('.icon-ph').count();
+    check('Add button on empty slot 6 fills it and focuses its name input',
+      (await page.locator('.card').count()) === 8 && focusedIsName &&
+      (await page.locator('.card').nth(5).locator('.f-name').count()) === 1);
+    check('3 empty cards remain after filling slot 6',
+      (await page.locator('.card.slot-empty').count()) === 3);
+    const fresh = page.locator('.card').nth(5);
     check('new unsaved card shows a placeholder instead of an icon',
-      placeholder === 1 && (await fresh.locator('img').count()) === 0);
+      (await fresh.locator('.icon-ph').count()) === 1 && (await fresh.locator('img').count()) === 0);
+    check('new card starts blank with window normal and ifRunning focus',
+      (await fresh.locator('.f-name').inputValue()) === '' &&
+      (await fresh.locator('.f-target').inputValue()) === '' &&
+      (await fresh.locator('.f-process').inputValue()) === '' &&
+      (await fresh.locator('.f-window').inputValue()) === 'normal' &&
+      (await fresh.locator('.f-ifrunning').inputValue()) === 'focus');
+    check('"Unsaved changes" appears after adding a button', await dirty.isVisible());
     await fresh.locator('.f-name').fill('Test App');
     await fresh.locator('.f-target').fill('C:\\Tools\\test.exe');
     await save(page);
     state = await statusState(page);
     api = await apiButtons(base);
-    const added = api.find((b) => b.id === 'test-app');
-    check('added button saved with id "test-app" and derived process "test.exe"',
-      state.text === 'Saved' && added && added.name === 'Test App' &&
+    const added = api[5];
+    check('added button saved at index 5 with id "test-app" and derived process "test.exe"',
+      state.text === 'Saved' && added && added.id === 'test-app' && added.name === 'Test App' &&
       added.process === 'test.exe' && added.target === 'C:\\Tools\\test.exe',
       JSON.stringify(state) + ' ' + JSON.stringify(added));
+    check('slots 5, 7 and 8 are still null and the list has 8 entries',
+      api.length === 8 && api[4] === null && api[6] === null && api[7] === null,
+      JSON.stringify(api));
     await page.waitForFunction(() =>
       [...document.querySelectorAll('.card img.icon')].length === 5);
-    check('re-render after save shows id "test-app" on the new card',
-      (await page.locator('.card').nth(4).locator('.id').textContent()) === 'test-app');
+    check('re-render after save shows id "test-app" on slot 6',
+      (await page.locator('.card').nth(5).locator('.id').textContent()) === 'test-app');
 
     // 4
-    const testIndex = await cardIndexByName(page, 'Test App');
-    await page.locator('.card').nth(testIndex).locator('.btn-up').click();
-    shown = await cardNames(page);
-    check('Move up reorders the card in the editor',
-      shown[testIndex - 1] === 'Test App', JSON.stringify(shown));
-    await save(page);
-    api = await apiButtons(base);
-    check('API order reflects the moved "Test App" card',
-      JSON.stringify(names(api)) === JSON.stringify(shown) &&
-      names(api).indexOf('Test App') === testIndex - 1, JSON.stringify(names(api)));
-    check('Move up is disabled on the first card and Move down on the last',
+    check('Move up is disabled on slot 1 and Move down on slot 8',
       (await page.locator('.card').first().locator('.btn-up').isDisabled()) &&
       (await page.locator('.card').last().locator('.btn-down').isDisabled()));
-
-    // 5
-    await page.locator('.card').nth(await cardIndexByName(page, 'Discord')).locator('.btn-delete').click();
-    check('Delete removes the card immediately and nothing is persisted yet',
-      !(await cardNames(page)).includes('Discord') &&
-      names(await apiButtons(base)).includes('Discord'));
+    await page.locator('.card').nth(5).locator('.btn-up').click();
+    shown = await cardNames(page);
+    check('Move up swaps Test App with the empty slot above it',
+      shown[4] === 'Test App' && shown[5] === null, JSON.stringify(shown));
+    check('"Unsaved changes" appears after a move', await dirty.isVisible());
+    check('focus stays on the moved card\'s Move up button',
+      await page.evaluate(() => document.activeElement &&
+        document.activeElement.classList.contains('btn-up') &&
+        document.activeElement.closest('.card') === document.querySelectorAll('.card')[4]));
+    check('nothing persisted before Save',
+      api[5].id === 'test-app' && (await apiButtons(base))[5].id === 'test-app');
     await save(page);
     api = await apiButtons(base);
-    check('API no longer has Discord and 4 buttons remain',
-      !names(api).includes('Discord') && api.length === 4, JSON.stringify(names(api)));
+    check('API has Test App at index 4 and null at index 5',
+      api[4] && api[4].name === 'Test App' && api[5] === null, JSON.stringify(slotNames(api)));
+    check('Steam X, Discord, SimHub, SimMotion did not move',
+      JSON.stringify(slotIds(api.slice(0, 4))) ===
+      JSON.stringify(['steam', 'discord', 'simhub', 'simmotion']));
+
+    // 5
+    await page.locator('.card').nth(1).locator('.btn-delete').click();
+    shown = await cardNames(page);
+    check('Delete empties slot 2 in place and nothing is persisted yet',
+      shown[1] === null && shown[2] === 'SimHub' && shown[4] === 'Test App' &&
+      (await apiButtons(base))[1].id === 'discord', JSON.stringify(shown));
+    await save(page);
+    api = await apiButtons(base);
+    check('API has null at index 1 and no other slot shifted',
+      JSON.stringify(slotNames(api)) === JSON.stringify(
+        ['Steam X', null, 'SimHub', 'SimMotion', 'Test App', null, null, null]) &&
+      api.length === 8, JSON.stringify(slotNames(api)));
 
     // 6
     const before = JSON.stringify(api);
-    await page.click('#add');
+    await page.locator('.card').nth(1).locator('.btn-add').click();
     expectedBadRequests = 1;
     await save(page);
     state = await statusState(page);
@@ -195,15 +230,15 @@ async function run(base) {
       JSON.stringify(await apiButtons(base)) === before);
     check('"Unsaved changes" is still shown after a failed save', await dirty.isVisible());
     expectedBadRequests = 0;
-    await page.locator('.card').last().locator('.btn-delete').click();
-    check('removing the invalid card clears the unsaved indicator', !(await dirty.isVisible()));
+    await page.locator('.card').nth(1).locator('.btn-delete').click();
+    check('emptying the invalid slot clears the unsaved indicator', !(await dirty.isVisible()));
 
     // 8
     await page.reload();
     await page.waitForSelector('.card');
     shown = await cardNames(page);
     check('reloading /edit shows the persisted state',
-      JSON.stringify(shown) === JSON.stringify(names(api)), JSON.stringify(shown));
+      JSON.stringify(shown) === JSON.stringify(slotNames(api)), JSON.stringify(shown));
     const persisted = page.locator('.card').first();
     check('reloaded card keeps the persisted window and ifRunning values',
       (await persisted.locator('.f-window').inputValue()) === 'minimized' &&
@@ -216,6 +251,9 @@ async function run(base) {
     const labels = await phone.$$eval('.tile .label', (list) => list.map((l) => l.textContent));
     check('phone page shows a tile labelled "Steam X"', labels.includes('Steam X'),
       JSON.stringify(labels));
+    const emptyTiles = await phone.locator('.tile.empty').count();
+    check('phone page shows 3 or more empty slots and 8 slots in total',
+      emptyTiles >= 3 && (await phone.locator('#grid > *').count()) === 8, String(emptyTiles));
     await phone.close();
 
     // 9

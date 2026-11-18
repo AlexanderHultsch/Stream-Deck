@@ -79,6 +79,37 @@ h1 {
   border-radius: 14px;
 }
 
+.slot-title {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+
+.card.slot-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  padding: 10px 18px;
+  background: transparent;
+  border-style: dashed;
+}
+
+.slot-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+
+.slot-empty .actions {
+  padding-top: 0;
+}
+
 .side {
   display: flex;
   flex-direction: column;
@@ -279,11 +310,10 @@ select:hover {
 <main>
   <header>
     <h1>Edit buttons</h1>
-    <p class="lead muted">Only available on this PC (localhost). Changes apply to the phone page on its next refresh.</p>
+    <p class="lead muted">Only available on this PC (localhost). 8 slots. Empty slots appear as blank tiles on the phone. Changes apply to the phone page on its next refresh.</p>
   </header>
-  <ol id="list" aria-label="Buttons"></ol>
+  <ol id="list" aria-label="Slots"></ol>
   <div class="footer">
-    <button type="button" class="btn" id="add" disabled>Add button</button>
     <button type="button" class="btn primary" id="save" disabled>Save</button>
     <span id="dirty" hidden>Unsaved changes</span>
     <p id="status" role="status" aria-live="polite"></p>
