@@ -1,0 +1,1069 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#0b0d10">
+<title>Stream Deck - Trackpad mockup</title>
+<style>
+:root {
+  color-scheme: dark;
+  --bg: #0b0d10;
+  --tile: #161a20;
+  --border: #232830;
+  --text: #e8ecf1;
+  --muted: #8a93a0;
+  --ok: #2ecc71;
+  --error: #ff5d5d;
+  --accent: #1e90ff;
+  --accent-soft: rgba(30, 144, 255, .14);
+  --pad: #1b2028;
+  --tabbar: #0f1216;
+  --sat: env(safe-area-inset-top);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+  --sar: env(safe-area-inset-right);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html {
+  background: var(--bg);
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  cursor: pointer;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:focus:not(:focus-visible) {
+  outline: none;
+}
+
+svg {
+  display: block;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.mock-label {
+  display: none;
+}
+
+.phone {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  height: var(--app-h, 100dvh);
+}
+
+.screen {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  padding-top: var(--sat);
+}
+
+.panels {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.panel {
+  position: absolute;
+  inset: 0;
+  padding: 16px;
+  padding-left: calc(16px + var(--sal));
+  padding-right: calc(16px + var(--sar));
+}
+
+/* ---------- tab bar ---------- */
+
+.tabbar {
+  display: flex;
+  flex: none;
+  background: var(--tabbar);
+  border-top: 1px solid var(--border);
+  padding-bottom: var(--sab);
+  padding-left: var(--sal);
+  padding-right: var(--sar);
+}
+
+.tab {
+  position: relative;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 60px;
+  padding: 8px 4px;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  transition: color 120ms ease-out;
+}
+
+.tab::before {
+  content: "";
+  position: absolute;
+  top: -1px;
+  left: 50%;
+  width: 34px;
+  height: 3px;
+  background: var(--accent);
+  border-radius: 0 0 3px 3px;
+  transform: translateX(-50%) scaleX(0);
+  transition: transform 160ms ease-out;
+}
+
+.tab[aria-selected="true"] {
+  color: var(--accent);
+}
+
+.tab[aria-selected="true"]::before {
+  transform: translateX(-50%) scaleX(1);
+}
+
+.tab svg {
+  width: 24px;
+  height: 24px;
+}
+
+/* ---------- deck tab (recreation of the real page) ---------- */
+
+#panel-deck {
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+}
+
+#grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 14px;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  aspect-ratio: 1 / 1;
+  padding: 12px;
+  background: var(--tile);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  color: var(--text);
+  transition: transform 80ms ease-out;
+}
+
+.tile:active {
+  transform: scale(.96);
+}
+
+.tile .icon {
+  width: 56%;
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
+  pointer-events: none;
+}
+
+.label {
+  max-width: 100%;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.flash {
+  animation: flash 250ms ease-out;
+}
+
+@keyframes flash {
+  0% {
+    outline: 2px solid var(--ok);
+    outline-offset: -2px;
+    box-shadow: 0 0 22px rgba(46, 204, 113, .55);
+  }
+  100% {
+    outline: 2px solid transparent;
+    outline-offset: -2px;
+    box-shadow: 0 0 0 rgba(46, 204, 113, 0);
+  }
+}
+
+/* ---------- trackpad tab ---------- */
+
+#panel-trackpad {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-areas: "head" "pad" "clicks";
+  gap: 12px;
+}
+
+.tp-head {
+  grid-area: head;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 46px;
+}
+
+.tp-titles {
+  min-width: 0;
+}
+
+h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 24px;
+  letter-spacing: -.01em;
+}
+
+.sub {
+  display: flex;
+  align-items: center;
+  height: 22px;
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 10px 0 8px;
+  background: var(--accent-soft);
+  border: 1px solid rgba(30, 144, 255, .35);
+  border-radius: 999px;
+  color: #6bb7ff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  background: var(--accent);
+  border-radius: 50%;
+}
+
+.kb-btn {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 18px 0 14px;
+  background: var(--tile);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+  transition: transform 80ms ease-out, border-color 120ms ease-out, background 120ms ease-out, color 120ms ease-out;
+}
+
+.kb-btn svg {
+  width: 22px;
+  height: 22px;
+}
+
+.kb-btn:active {
+  transform: scale(.96);
+}
+
+.kb-btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.pad {
+  position: relative;
+  grid-area: pad;
+  min-height: 0;
+  overflow: hidden;
+  background-color: var(--pad);
+  background-image: radial-gradient(circle, rgba(255, 255, 255, .07) 1px, transparent 1.4px);
+  background-size: 22px 22px;
+  background-position: 11px 11px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .04),
+    inset 0 0 0 1px rgba(0, 0, 0, .25),
+    inset 0 -18px 40px rgba(0, 0, 0, .18);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: border-color 120ms ease-out, box-shadow 160ms ease-out;
+}
+
+.pad.touched {
+  border-color: var(--accent);
+  box-shadow:
+    inset 0 0 0 1px rgba(30, 144, 255, .55),
+    inset 0 0 36px rgba(30, 144, 255, .16),
+    0 0 22px rgba(30, 144, 255, .28);
+}
+
+.pad-hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px;
+  color: var(--muted);
+  text-align: center;
+  pointer-events: none;
+  transition: opacity 180ms ease-out;
+}
+
+.pad.touched .pad-hint {
+  opacity: 0;
+}
+
+.gestures {
+  display: flex;
+  gap: 18px;
+  margin-bottom: 10px;
+  opacity: .6;
+}
+
+.gestures svg {
+  width: 30px;
+  height: 30px;
+  stroke-width: 1.5;
+}
+
+.pad-hint p {
+  margin: 0;
+  max-width: 30ch;
+  text-wrap: balance;
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.pad-hint .hint2 {
+  font-size: 13px;
+  font-weight: 400;
+  color: #697280;
+}
+
+.dot {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 60px;
+  height: 60px;
+  margin: -30px 0 0 -30px;
+  background: radial-gradient(circle, rgba(30, 144, 255, .5) 0%, rgba(30, 144, 255, .22) 55%, rgba(30, 144, 255, .08) 100%);
+  border: 2px solid rgba(30, 144, 255, .85);
+  border-radius: 50%;
+  box-shadow: 0 0 22px rgba(30, 144, 255, .45);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.ripple {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 60px;
+  height: 60px;
+  margin: -30px 0 0 -30px;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  pointer-events: none;
+  animation: ripple 420ms ease-out forwards;
+}
+
+@keyframes ripple {
+  0% {
+    opacity: .85;
+    scale: .5;
+  }
+  100% {
+    opacity: 0;
+    scale: 2.1;
+  }
+}
+
+.scroll-chip {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 14px 0 10px;
+  background: rgba(11, 13, 16, .85);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.scroll-chip svg {
+  width: 16px;
+  height: 16px;
+}
+
+.clicks {
+  grid-area: clicks;
+  display: flex;
+  gap: 12px;
+  height: 76px;
+}
+
+.click {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 64px;
+  padding: 0 12px;
+  background: var(--tile);
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 600;
+  touch-action: none;
+  transition: transform 80ms ease-out, background 80ms ease-out, border-color 80ms ease-out;
+}
+
+.click[data-btn="left"] {
+  flex: 3;
+}
+
+.click[data-btn="right"] {
+  flex: 2;
+}
+
+.click svg {
+  width: 24px;
+  height: 24px;
+  color: var(--muted);
+}
+
+.click svg .fill {
+  fill: currentColor;
+  stroke: none;
+  opacity: 0;
+}
+
+.click[data-btn="left"] svg .fill-l,
+.click[data-btn="right"] svg .fill-r {
+  opacity: .45;
+}
+
+.click.pressed,
+.click:active {
+  transform: scale(.97);
+  background: #0f1318;
+  border-color: var(--accent);
+}
+
+.click.pressed svg,
+.click:active svg {
+  color: var(--accent);
+}
+
+.click.pressed svg .fill,
+.click:active svg .fill {
+  opacity: 0;
+}
+
+.click.pressed[data-btn="left"] svg .fill-l,
+.click.pressed[data-btn="right"] svg .fill-r,
+.click[data-btn="left"]:active svg .fill-l,
+.click[data-btn="right"]:active svg .fill-r {
+  opacity: .9;
+}
+
+.kb-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  font-size: 16px;
+  pointer-events: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ---------- landscape phone ---------- */
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .screen {
+    flex-direction: row;
+  }
+
+  .tabbar {
+    order: -1;
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    width: calc(76px + var(--sal));
+    padding: 8px 0 calc(8px + var(--sab)) var(--sal);
+    border-top: 0;
+    border-right: 1px solid var(--border);
+  }
+
+  .tab {
+    flex: none;
+    min-height: 64px;
+    padding: 6px 4px;
+  }
+
+  .tab::before {
+    top: 50%;
+    left: 0;
+    width: 3px;
+    height: 34px;
+    border-radius: 0 3px 3px 0;
+    transform: translateY(-50%) scaleY(0);
+  }
+
+  .tab[aria-selected="true"]::before {
+    transform: translateY(-50%) scaleY(1);
+  }
+
+  .panel {
+    padding: 12px;
+    padding-left: 14px;
+    padding-right: calc(14px + var(--sar));
+    padding-bottom: calc(12px + var(--sab));
+  }
+
+  #grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-content: center;
+    min-height: 100%;
+  }
+
+  #panel-trackpad {
+    grid-template-columns: minmax(0, 1fr) minmax(180px, 30%);
+    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-areas: "pad head" "pad clicks";
+  }
+
+  .tp-head {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 8px;
+    min-height: 0;
+  }
+
+  h1 {
+    display: none;
+  }
+
+  .kb-btn {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .sub {
+    justify-content: center;
+  }
+
+  .clicks {
+    flex-direction: column;
+    height: auto;
+  }
+
+  .click[data-btn="left"],
+  .click[data-btn="right"] {
+    flex: 1;
+    min-height: 0;
+    font-size: 18px;
+  }
+
+  .gestures {
+    margin-bottom: 4px;
+  }
+
+  .scroll-chip {
+    top: 10px;
+  }
+}
+
+/* ---------- desktop review frame ---------- */
+
+@media (min-width: 601px) and (min-height: 501px) {
+  html,
+  body {
+    background: #07090c;
+  }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 18px 0;
+    overflow-y: auto;
+    background:
+      radial-gradient(ellipse at 50% 30%, rgba(30, 144, 255, .05), transparent 60%),
+      #07090c;
+  }
+
+  .mock-label {
+    display: block;
+    position: fixed;
+    top: 16px;
+    left: 18px;
+    color: #4d5560;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .18em;
+  }
+
+  .phone {
+    flex: none;
+    width: 390px;
+    height: 844px;
+    padding: 10px;
+    box-sizing: content-box;
+    background: #020203;
+    border-radius: 56px;
+    box-shadow:
+      0 0 0 1px #2a2f37,
+      0 0 0 3px #0c0e11,
+      0 30px 80px rgba(0, 0, 0, .65);
+  }
+
+  .screen {
+    border-radius: 46px;
+    --sat: 40px;
+    --sab: 22px;
+  }
+
+  .screen::before {
+    content: "";
+    position: absolute;
+    top: 11px;
+    left: 50%;
+    z-index: 5;
+    width: 104px;
+    height: 28px;
+    background: #000;
+    border-radius: 999px;
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+
+  .screen::after {
+    content: "";
+    position: absolute;
+    bottom: 7px;
+    left: 50%;
+    z-index: 5;
+    width: 126px;
+    height: 4px;
+    background: rgba(232, 236, 241, .55);
+    border-radius: 999px;
+    transform: translateX(-50%);
+    pointer-events: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tile,
+  .kb-btn,
+  .click,
+  .tab,
+  .tab::before,
+  .pad,
+  .pad-hint {
+    transition: none;
+  }
+
+  .flash {
+    animation: none;
+  }
+
+  .ripple {
+    animation: none;
+    opacity: .5;
+    scale: 1.2;
+  }
+}
+</style>
+</head>
+<body>
+<div class="mock-label" aria-hidden="true">MOCKUP</div>
+<div class="phone">
+<div class="screen" id="app">
+
+<div class="panels">
+
+<section class="panel" id="panel-deck" role="tabpanel" aria-labelledby="tab-deck" hidden>
+<main id="grid">
+<button type="button" class="tile" aria-label="Steam"><span class="icon" style="background:#6f6540"></span><span class="label">Steam</span></button>
+<button type="button" class="tile" aria-label="Discord"><span class="icon" style="background:#7a8091"></span><span class="label">Discord</span></button>
+<button type="button" class="tile" aria-label="SimHub"><span class="icon" style="background:#b040c0"></span><span class="label">SimHub</span></button>
+<button type="button" class="tile" aria-label="SimMotion"><span class="icon" style="background:#56ad5a"></span><span class="label">SimMotion</span></button>
+</main>
+</section>
+
+<section class="panel" id="panel-trackpad" role="tabpanel" aria-labelledby="tab-trackpad">
+<header class="tp-head">
+  <div class="tp-titles">
+    <h1>Trackpad</h1>
+    <div class="sub">
+      <span class="hint" id="kbHint">Phone as mouse</span>
+      <span class="chip" id="kbChip" hidden>Keyboard on &middot; <span id="kbCount">0 keys</span> sent</span>
+    </div>
+  </div>
+  <button type="button" class="kb-btn" id="kbBtn" aria-label="Keyboard" aria-pressed="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="3"/><path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M7 14h10"/></svg>
+    <span>Keyboard</span>
+  </button>
+</header>
+
+<div class="pad" id="pad">
+  <div class="pad-hint">
+    <div class="gestures" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-2.5 2.5M12 3l2.5 2.5M12 21l-2.5-2.5M12 21l2.5-2.5M3 12l2.5-2.5M3 12l2.5 2.5M21 12l-2.5-2.5M21 12l-2.5 2.5"/></svg>
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5"/><circle cx="12" cy="12" r="6.5" opacity=".6"/><circle cx="12" cy="12" r="10" opacity=".3"/></svg>
+      <svg viewBox="0 0 24 24"><circle cx="8" cy="13" r="2.2"/><circle cx="16" cy="13" r="2.2"/><path d="M8 8V3.5M6 5.5l2-2 2 2M16 18v2.5M14 18.5l2 2 2-2"/></svg>
+    </div>
+    <p>Move &middot; tap to click &middot; two fingers to scroll</p>
+    <p class="hint2">Two-finger tap = right click</p>
+  </div>
+  <div class="scroll-chip" id="scrollChip" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4"/></svg>
+    <span>Scroll</span>
+  </div>
+</div>
+
+<div class="clicks">
+  <button type="button" class="click" data-btn="left" aria-label="Left click">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="2.5" width="14" height="19" rx="7"/><path d="M5 11h14M12 2.5V11"/><path class="fill fill-l" d="M12 2.5v8.5H5V9.5a7 7 0 0 1 7-7z"/><path class="fill fill-r" d="M12 2.5a7 7 0 0 1 7 7V11h-7z"/></svg>
+    <span>Left</span>
+  </button>
+  <button type="button" class="click" data-btn="right" aria-label="Right click">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="2.5" width="14" height="19" rx="7"/><path d="M5 11h14M12 2.5V11"/><path class="fill fill-l" d="M12 2.5v8.5H5V9.5a7 7 0 0 1 7-7z"/><path class="fill fill-r" d="M12 2.5a7 7 0 0 1 7 7V11h-7z"/></svg>
+    <span>Right</span>
+  </button>
+</div>
+</section>
+
+</div>
+
+<nav class="tabbar" role="tablist" aria-label="Sections">
+  <button type="button" class="tab" id="tab-deck" role="tab" aria-selected="false" aria-controls="panel-deck" tabindex="-1">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>
+    <span>Deck</span>
+  </button>
+  <button type="button" class="tab" id="tab-trackpad" role="tab" aria-selected="true" aria-controls="panel-trackpad">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="3.5"/><path d="M3 14.5h18M12 14.5v5"/></svg>
+    <span>Trackpad</span>
+  </button>
+</nav>
+
+<input class="kb-input" id="kbInput" type="text" inputmode="text" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" enterkeyhint="send" tabindex="-1" aria-label="Typing here sends keys to the PC">
+
+</div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var tabs = Array.prototype.slice.call(document.querySelectorAll(".tab"));
+  var panels = {
+    deck: document.getElementById("panel-deck"),
+    trackpad: document.getElementById("panel-trackpad")
+  };
+  var kbInput = document.getElementById("kbInput");
+  var kbBtn = document.getElementById("kbBtn");
+  var kbChip = document.getElementById("kbChip");
+  var kbHint = document.getElementById("kbHint");
+  var kbCount = document.getElementById("kbCount");
+  var pad = document.getElementById("pad");
+  var scrollChip = document.getElementById("scrollChip");
+
+  /* ---------- tabs ---------- */
+
+  function selectTab(name, focusTab) {
+    kbInput.blur();
+    tabs.forEach(function (tab) {
+      var on = tab.id === "tab-" + name;
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+      tab.tabIndex = on ? 0 : -1;
+      panels[tab.id.slice(4)].hidden = !on;
+      if (on && focusTab) tab.focus();
+    });
+  }
+
+  tabs.forEach(function (tab, i) {
+    tab.addEventListener("click", function () {
+      selectTab(tab.id.slice(4));
+    });
+    tab.addEventListener("keydown", function (e) {
+      var next = null;
+      if (e.key === "ArrowRight") next = tabs[(i + 1) % tabs.length];
+      else if (e.key === "ArrowLeft") next = tabs[(i + tabs.length - 1) % tabs.length];
+      else if (e.key === "Home") next = tabs[0];
+      else if (e.key === "End") next = tabs[tabs.length - 1];
+      if (next) {
+        e.preventDefault();
+        selectTab(next.id.slice(4), true);
+      }
+    });
+  });
+
+  selectTab("trackpad");
+
+  /* ---------- deck tiles (visual flash only) ---------- */
+
+  Array.prototype.forEach.call(document.querySelectorAll(".tile"), function (tile) {
+    tile.addEventListener("click", function () {
+      tile.classList.remove("flash");
+      void tile.offsetWidth;
+      tile.classList.add("flash");
+    });
+    tile.addEventListener("animationend", function () {
+      tile.classList.remove("flash");
+    });
+  });
+
+  /* ---------- pad ---------- */
+
+  var touches = new Map();
+  var gestureMax = 0;
+
+  function padPoint(e) {
+    var r = pad.getBoundingClientRect();
+    return { x: e.clientX - r.left - pad.clientLeft, y: e.clientY - r.top - pad.clientTop };
+  }
+
+  function place(el, p) {
+    el.style.transform = "translate(" + p.x + "px," + p.y + "px)";
+  }
+
+  function syncPad() {
+    pad.classList.toggle("touched", touches.size > 0);
+    scrollChip.hidden = touches.size < 2;
+  }
+
+  function ripple(p) {
+    var r = document.createElement("div");
+    r.className = "ripple";
+    r.style.left = p.x + "px";
+    r.style.top = p.y + "px";
+    pad.appendChild(r);
+    r.addEventListener("animationend", function () { r.remove(); });
+    setTimeout(function () { r.remove(); }, 600);
+  }
+
+  function release(e) {
+    var t = touches.get(e.pointerId);
+    if (!t) return;
+    var p = padPoint(e);
+    var quick = performance.now() - t.t0 < 320;
+    var still = Math.hypot(p.x - t.x0, p.y - t.y0) < 12;
+    if (e.type === "pointerup" && quick && still) ripple(p);
+    t.dot.remove();
+    touches.delete(e.pointerId);
+    if (touches.size === 0) gestureMax = 0;
+    syncPad();
+  }
+
+  pad.addEventListener("pointerdown", function (e) {
+    if (touches.has(e.pointerId) || touches.size >= 2) return;
+    e.preventDefault();
+    try { pad.setPointerCapture(e.pointerId); } catch (err) {}
+    var p = padPoint(e);
+    var dot = document.createElement("div");
+    dot.className = "dot";
+    place(dot, p);
+    pad.appendChild(dot);
+    touches.set(e.pointerId, { dot: dot, x0: p.x, y0: p.y, t0: performance.now() });
+    gestureMax = Math.max(gestureMax, touches.size);
+    syncPad();
+  });
+
+  pad.addEventListener("pointermove", function (e) {
+    var t = touches.get(e.pointerId);
+    if (t) place(t.dot, padPoint(e));
+  });
+
+  pad.addEventListener("pointerup", release);
+  pad.addEventListener("pointercancel", release);
+  pad.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+
+  /* ---------- left / right buttons ---------- */
+
+  Array.prototype.forEach.call(document.querySelectorAll(".click"), function (btn) {
+    function down() { btn.classList.add("pressed"); }
+    function up() { btn.classList.remove("pressed"); }
+    btn.addEventListener("pointerdown", function (e) {
+      try { btn.setPointerCapture(e.pointerId); } catch (err) {}
+      down();
+    });
+    btn.addEventListener("pointerup", up);
+    btn.addEventListener("pointercancel", up);
+    btn.addEventListener("lostpointercapture", up);
+    btn.addEventListener("keydown", function (e) {
+      if (e.key === " " || e.key === "Enter") down();
+    });
+    btn.addEventListener("keyup", up);
+    btn.addEventListener("blur", up);
+    btn.addEventListener("contextmenu", function (e) { e.preventDefault(); });
+  });
+
+  /* ---------- keyboard ---------- */
+
+  var keys = 0;
+
+  function renderKeys() {
+    kbCount.textContent = keys + (keys === 1 ? " key" : " keys");
+  }
+
+  function syncKb() {
+    var on = document.activeElement === kbInput;
+    kbBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    kbChip.hidden = !on;
+    kbHint.hidden = on;
+  }
+
+  var wasOpen = false;
+  kbBtn.addEventListener("pointerdown", function () {
+    wasOpen = document.activeElement === kbInput;
+  });
+  kbBtn.addEventListener("mousedown", function (e) {
+    e.preventDefault();
+  });
+  kbBtn.addEventListener("click", function (e) {
+    var open = e.detail === 0 ? document.activeElement === kbInput : wasOpen;
+    if (open) kbInput.blur();
+    else kbInput.focus({ preventScroll: true });
+  });
+
+  kbInput.addEventListener("focus", syncKb);
+  kbInput.addEventListener("blur", syncKb);
+
+  kbInput.addEventListener("keydown", function (e) {
+    if (e.key === "Backspace" || e.key === "Enter") {
+      keys += 1;
+      renderKeys();
+    }
+  });
+
+  kbInput.addEventListener("input", function (e) {
+    if (e.isComposing) return;
+    var type = e.inputType || "";
+    if (type.indexOf("delete") !== 0 && type !== "insertLineBreak") {
+      keys += e.data ? e.data.length : 1;
+      renderKeys();
+    }
+    kbInput.value = "";
+  });
+
+  kbInput.addEventListener("compositionend", function (e) {
+    keys += e.data ? e.data.length : 1;
+    renderKeys();
+    kbInput.value = "";
+  });
+
+  renderKeys();
+  syncKb();
+
+  /* ---------- keep the app above the on-screen keyboard ---------- */
+
+  if (window.visualViewport) {
+    var vv = window.visualViewport;
+    var syncViewport = function () {
+      document.documentElement.style.setProperty("--app-h", vv.height + "px");
+      if (window.scrollY) window.scrollTo(0, 0);
+    };
+    vv.addEventListener("resize", syncViewport);
+    vv.addEventListener("scroll", syncViewport);
+  }
+})();
+</script>
+</body>
+</html>
