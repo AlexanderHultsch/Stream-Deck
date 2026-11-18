@@ -67,6 +67,7 @@ STATIC_TYPES = {
     "edit.html": "text/html; charset=utf-8",
     "app.js": "text/javascript",
     "edit.js": "text/javascript",
+    "trackpad.js": "text/javascript",
     "style.css": "text/css",
     "manifest.webmanifest": "application/manifest+json",
 }

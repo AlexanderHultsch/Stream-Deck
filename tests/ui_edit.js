@@ -7,8 +7,8 @@ const { chromium } = require('playwright');
 
 const ROOT = path.resolve(__dirname, '..');
 const SHOT_DIR = process.env.SHOT_DIR || os.tmpdir();
-const COPY_FILES = ['server.py', 'index.html', 'edit.html', 'app.js', 'edit.js', 'style.css',
-  'manifest.webmanifest'];
+const COPY_FILES = ['server.py', 'index.html', 'edit.html', 'app.js', 'edit.js', 'trackpad.js',
+  'style.css', 'manifest.webmanifest'];
 
 function freePort() {
   return new Promise((resolve, reject) => {

@@ -13,9 +13,58 @@
 <title>Stream Deck</title>
 <link rel="stylesheet" href="/style.css">
 <script src="/app.js" defer></script>
+<script src="/trackpad.js" defer></script>
 </head>
 <body>
+<div class="app" id="app">
+<div class="panels">
+<section class="panel" id="panel-deck" role="tabpanel" aria-labelledby="tab-deck">
 <main id="grid"></main>
+</section>
+<section class="panel" id="panel-pad" role="tabpanel" aria-labelledby="tab-pad" hidden>
+<header class="pad-head">
+  <div class="chip" id="chip" data-state="connecting"><span id="chipText">Connecting&hellip;</span></div>
+  <button type="button" class="kb-btn" id="kbBtn" aria-label="Keyboard" aria-pressed="false">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="3"/><path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M7 14h10"/></svg>
+  </button>
+</header>
+<div class="pad" id="pad">
+  <div class="pad-hint">
+    <div class="gestures" aria-hidden="true">
+      <svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M12 3l-2.5 2.5M12 3l2.5 2.5M12 21l-2.5-2.5M12 21l2.5-2.5M3 12l2.5-2.5M3 12l2.5 2.5M21 12l-2.5-2.5M21 12l-2.5 2.5"/></svg>
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.5"/><circle cx="12" cy="12" r="6.5" opacity=".6"/><circle cx="12" cy="12" r="10" opacity=".3"/></svg>
+      <svg viewBox="0 0 24 24"><circle cx="8" cy="13" r="2.2"/><circle cx="16" cy="13" r="2.2"/><path d="M8 8V3.5M6 5.5l2-2 2 2M16 18v2.5M14 18.5l2 2 2-2"/></svg>
+    </div>
+    <p>Move &middot; tap to click &middot; two fingers to scroll</p>
+    <p class="hint2">Two-finger tap = right click</p>
+  </div>
+  <div class="scroll-chip" id="scrollChip" hidden>
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v16M8 8l4-4 4 4M8 16l4 4 4-4"/></svg>
+    <span>Scroll</span>
+  </div>
+</div>
+<div class="clicks">
+  <button type="button" class="click" data-btn="left" aria-label="Left click">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path class="half" d="M12 2.5v8.5H5V9.5a7 7 0 0 1 7-7z"/><rect x="5" y="2.5" width="14" height="19" rx="7"/><path d="M5 11h14M12 2.5V11"/></svg>
+  </button>
+  <button type="button" class="click" data-btn="right" aria-label="Right click">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path class="half" d="M12 2.5a7 7 0 0 1 7 7V11h-7z"/><rect x="5" y="2.5" width="14" height="19" rx="7"/><path d="M5 11h14M12 2.5V11"/></svg>
+  </button>
+</div>
+</section>
+</div>
+<nav class="tabbar" role="tablist" aria-label="Sections">
+  <button type="button" class="tab" id="tab-deck" role="tab" aria-selected="true" aria-controls="panel-deck">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></svg>
+    <span>Deck</span>
+  </button>
+  <button type="button" class="tab" id="tab-pad" role="tab" aria-selected="false" aria-controls="panel-pad" tabindex="-1">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="3.5"/><path d="M3 14.5h18M12 14.5v5"/></svg>
+    <span>Trackpad</span>
+  </button>
+</nav>
+</div>
+<input class="kb-input" id="kbInput" type="text" inputmode="text" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" enterkeyhint="enter" tabindex="-1" aria-label="Typing here sends keys to the PC">
 <div id="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

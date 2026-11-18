@@ -68,6 +68,28 @@ async function layout(page) {
   });
 }
 
+async function tabs(page) {
+  return page.evaluate(() => {
+    const box = (el) => {
+      const r = el.getBoundingClientRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, bottom: r.bottom };
+    };
+    return {
+      tabs: [...document.querySelectorAll('[role=tab]')].map((t) => ({
+        text: t.textContent.trim(), selected: t.getAttribute('aria-selected'),
+      })),
+      list: document.querySelectorAll('[role=tablist]').length,
+      deckHidden: document.getElementById('panel-deck').hidden,
+      padHidden: document.getElementById('panel-pad').hidden,
+      bar: box(document.querySelector('.tabbar')),
+      grid: box(document.getElementById('grid')),
+      tiles: [...document.querySelectorAll('#grid > *')].map(box),
+      innerW: window.innerWidth,
+      innerH: window.innerHeight,
+    };
+  });
+}
+
 async function run(base) {
   const browser = await chromium.launch();
   try {
@@ -116,6 +138,16 @@ async function run(base) {
       pLayout.scrollW + ' > ' + pLayout.innerW);
     check('portrait does not scroll vertically', pLayout.scrollH <= pLayout.innerH,
       pLayout.scrollH + ' > ' + pLayout.innerH);
+    const pTabs = await tabs(page);
+    check('portrait has a tablist with Deck (selected) and Trackpad, Trackpad panel hidden',
+      pTabs.list === 1 && JSON.stringify(pTabs.tabs) === JSON.stringify([
+        { text: 'Deck', selected: 'true' }, { text: 'Trackpad', selected: 'false' }]) &&
+      !pTabs.deckHidden && pTabs.padHidden, JSON.stringify(pTabs.tabs));
+    check('portrait tab bar is at the bottom and all 8 slots sit above it inside the screen',
+      pTabs.bar.bottom <= pTabs.innerH + 1 && pTabs.bar.y > pTabs.innerH / 2 &&
+      pTabs.tiles.every((r) => r.bottom <= pTabs.bar.y + 0.5 && r.y >= 0 && r.x >= 0 &&
+        r.right <= pTabs.innerW),
+      JSON.stringify({ bar: pTabs.bar, tiles: pTabs.tiles }));
     const pIcon = await page.$eval('.tile img', (img) => {
       const t = img.closest('.tile').getBoundingClientRect();
       const r = img.getBoundingClientRect();
@@ -160,6 +192,12 @@ async function run(base) {
       lLayout.scrollW + ' > ' + lLayout.innerW);
     check('landscape does not scroll vertically', lLayout.scrollH <= lLayout.innerH,
       lLayout.scrollH + ' > ' + lLayout.innerH);
+    const lTabs = await tabs(lpage);
+    check('landscape tab bar is a left rail and all 8 slots sit to its right inside the screen',
+      lTabs.bar.x <= 1 && lTabs.bar.h >= lTabs.innerH - 1 && lTabs.bar.w < lTabs.innerW / 4 &&
+      lTabs.padHidden && lTabs.tiles.every((r) => r.x >= lTabs.bar.right - 0.5 && r.y >= 0 &&
+        r.bottom <= lTabs.innerH && r.right <= lTabs.innerW),
+      JSON.stringify({ bar: lTabs.bar, tiles: lTabs.tiles }));
     const lIcon = await lpage.$eval('.tile img', (img) => {
       const tile = img.closest('.tile');
       const t = tile.getBoundingClientRect();

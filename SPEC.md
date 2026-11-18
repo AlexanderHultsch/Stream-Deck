@@ -5,10 +5,10 @@ A minimal Stream Deck for the iPhone. A tiny Python server on a Windows PC serve
 ## Goals
 - Very simple, effective and efficient.
 - No build step, no pip installs, no dependencies.
-- Four buttons: **Steam, Discord, SimHub, SimMotion** (racing setup), each with its original logo.
+- A deck of 8 configurable slots, by default **Steam, Discord, SimHub, SimMotion** (racing setup), each with its original logo, plus a **Trackpad tab** that turns the phone into a mouse and keyboard for the PC.
 
 ## Non-goals (v1)
-Multiple pages or folders, hotkey or macro actions, running-status dots, auto-start with Windows, a firewall or QR helper, run-as-admin, remote access outside the home network, login or PIN.
+Multiple pages or folders, hotkey or macro actions, running-status dots, auto-start with Windows, a firewall or QR helper, run-as-admin, remote access outside the home network, login or PIN. The trackpad and keyboard are in scope (see "Trackpad tab"), still without any login: any device on the Wi-Fi can control the PC.
 
 ## Architecture
 | Part | Decision |
@@ -51,6 +51,26 @@ Defaults:
 - Press feedback: tile flash and a short vibration where iOS allows it (iOS Safari does not support `navigator.vibrate`, so expect the visual flash only), plus a success or error toast from the server's response.
 - No running indicator in v1.
 
+## Trackpad tab
+The phone page has two tabs: **Deck** and **Trackpad** (tab bar at the bottom in portrait, left rail in landscape). The first tab on a fresh load is Deck; the last used tab is kept per phone in `localStorage` (`deck-tab`), and the page works without storage. Tab switching is in `app.js` and fires `deck:tab` (`detail.tab` = `deck` or `pad`) on `document`; `trackpad.js` listens to it.
+
+- Header: a status chip on the left ("Connecting..." amber, "Connected" green, "Offline" red; "Keyboard on · N keys sent" while the keyboard is open) and an icon-only keyboard button on the right. Typed text is never displayed.
+- Pad: one finger moves the cursor (delta x 1.6, fractional remainder carried, sent at most once per animation frame). Tap (up within 250 ms, under 10 px of movement) = left click. A second finger enters two-finger mode: tap (all fingers up within 350 ms, none moved over 12 px) = right click; moving = scroll (average of both fingers, natural direction). After a two-finger gesture the remaining finger does not move the cursor until all fingers are up.
+- L and R: icon-only mouse buttons (left half and right half highlighted). Press sends button down, release sends button up; they work together with a finger on the pad, so hold-and-drag works. They are released when the tab is left, the page is hidden or the connection closes.
+- Keyboard button: toggles focus on a hidden 16 px input so the system keyboard opens or closes. Text, Backspace and Enter are sent as they are typed.
+- Connection: `ws(s)://<host>/ws`, opened only while the Trackpad tab is active and the page is visible, closed otherwise. Reconnects after 500 ms, 1 s, 2 s, then every 3 s. Messages are dropped while the socket is not open (no queue). The server releases any held button when a connection ends.
+
+| Message (JSON, phone to PC) | Meaning |
+|---|---|
+| `{"t":"move","dx":int,"dy":int}` | relative cursor move, each in [-500, 500] |
+| `{"t":"btn","b":"left"\|"right","d":bool}` | button down (`true`) or up (`false`) |
+| `{"t":"click","b":"left"\|"right"}` | button down and up |
+| `{"t":"scroll","dx":int,"dy":int}` | wheel, each in [-400, 400]; `dy` > 0 scrolls down |
+| `{"t":"text","s":str}` | type text, at most 64 characters per message |
+| `{"t":"key","k":"backspace"\|"enter"}` | press a key |
+
+The server never replies. Windows ignores injected input for elevated windows unless the server runs as administrator. Scroll speed is tunable with `WHEEL_STEP` in `server.py`, cursor speed with `GAIN` in `trackpad.js`.
+
 ## Launch behavior (Windows)
 1. `POST /api/press/<id>` runs the button's action.
 2. Process running and `ifRunning = focus`: bring its window to the front with Win32 through `ctypes`. Restore it first if minimized.
@@ -70,10 +90,10 @@ Known caveat: Steam and Discord live in the tray and keep no normal window. "Foc
 server.py
 start.bat
 buttons.json
-index.html   edit.html   app.js   style.css   manifest.webmanifest
+index.html   edit.html   app.js   trackpad.js   edit.js   style.css   manifest.webmanifest
 logos/       (optional overrides)
 cache/       (extracted icons, git-ignored)
-tests/       (unit tests, ui_smoke.js, ui_edit.js)
+tests/       (unit tests incl. test_ws.py, ui_smoke.js, ui_edit.js, ui_pad.js)
 .gitignore
 README.md    (setup: install Python, run start.bat, open firewall port, add to home screen)
 ```

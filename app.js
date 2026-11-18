@@ -6,6 +6,10 @@
   var toast = document.getElementById("toast");
   var toastTimer = null;
   var loadToken = 0;
+  var TAB_KEY = "deck-tab";
+  var TABS = ["deck", "pad"];
+  var tabButtons = TABS.map(function (name) { return document.getElementById("tab-" + name); });
+  var tabPanels = TABS.map(function (name) { return document.getElementById("panel-" + name); });
 
   function showToast(text, ok) {
     toast.textContent = text;
@@ -98,11 +102,63 @@
       });
   }
 
+  function storedTab() {
+    try {
+      return localStorage.getItem(TAB_KEY) === "pad" ? "pad" : "deck";
+    } catch (e) {
+      return "deck";
+    }
+  }
+
+  function selectTab(name, options) {
+    options = options || {};
+    TABS.forEach(function (tab, i) {
+      var on = tab === name;
+      tabButtons[i].setAttribute("aria-selected", on ? "true" : "false");
+      tabButtons[i].tabIndex = on ? 0 : -1;
+      tabPanels[i].hidden = !on;
+      if (on && options.focus) tabButtons[i].focus();
+    });
+    if (options.save) {
+      try {
+        localStorage.setItem(TAB_KEY, name);
+      } catch (e) { /* no storage, the choice just is not remembered */ }
+    }
+    document.dispatchEvent(new CustomEvent("deck:tab", { detail: { tab: name } }));
+  }
+
+  tabButtons.forEach(function (button, i) {
+    button.addEventListener("click", function () {
+      selectTab(TABS[i], { save: true });
+    });
+    button.addEventListener("keydown", function (event) {
+      var next = -1;
+      if (event.key === "ArrowRight") next = (i + 1) % TABS.length;
+      else if (event.key === "ArrowLeft") next = (i + TABS.length - 1) % TABS.length;
+      else if (event.key === "Home") next = 0;
+      else if (event.key === "End") next = TABS.length - 1;
+      if (next < 0) return;
+      event.preventDefault();
+      selectTab(TABS[next], { save: true, focus: true });
+    });
+  });
+
+  if (window.visualViewport) {
+    var viewport = window.visualViewport;
+    var syncViewport = function () {
+      document.documentElement.style.setProperty("--app-h", viewport.height + "px");
+      if (window.scrollY) window.scrollTo(0, 0);
+    };
+    viewport.addEventListener("resize", syncViewport);
+    viewport.addEventListener("scroll", syncViewport);
+  }
+
   document.addEventListener("visibilitychange", function () {
     if (document.visibilityState === "visible") load();
   });
   window.addEventListener("pageshow", function (event) {
     if (event.persisted) load();
   });
+  selectTab(storedTab());
   load();
 })();
